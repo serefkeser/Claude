@@ -1076,12 +1076,17 @@ const attemptSilentReauth = async () => {
 const NetworkUtils = {
   fetchWithRetry: async (url, options, retries = 5) => {
     // Exponential backoff: baseDelay * 2^attempt + jitter
+    // 429 (rate limit) için tavan daha yüksek tutulur — RPM tabanlı limitler
+    // genelde tam 1 dakikalık pencerede sıfırlanır, kısa backoff yetmez.
     const baseDelay = 1000;
     const maxDelay = 30000;
+    const maxDelay429 = 65000;
     for (let i = 0; i < retries; i++) {
       const delay = Math.min(baseDelay * Math.pow(2, i), maxDelay);
+      const delay429 = Math.min(baseDelay * Math.pow(2, i + 1), maxDelay429);
       const jitter = Math.random() * 500; // 0-500ms jitter
       const totalDelay = delay + jitter;
+      const totalDelay429 = delay429 + jitter;
       try {
         const res = await fetch(url, options);
         if (res.ok) return res;
@@ -1093,7 +1098,13 @@ const NetworkUtils = {
           if (i === retries - 1) { sysEventBus.emit('AUTH_EXPIRED', true); throw new Error("Oturum süresi doldu (401)."); }
           await new Promise(r => setTimeout(r, totalDelay)); continue;
         }
-        if (res.status === 429 || res.status >= 500) { addSystemLog(`Yavaşlık (HTTP ${res.status}). Yeniden deneme (${i + 1}/${retries}) - ${(totalDelay / 1000).toFixed(1)}sn...`, "warn"); await new Promise(r => setTimeout(r, totalDelay)); continue; }
+        if (res.status === 429) {
+          const retryAfterHeader = parseFloat(res.headers?.get?.('retry-after'));
+          const waitMs = !isNaN(retryAfterHeader) ? Math.min(retryAfterHeader * 1000, maxDelay429) : totalDelay429;
+          addSystemLog(`Yavaşlık (HTTP 429 — API kotası). Yeniden deneme (${i + 1}/${retries}) - ${(waitMs / 1000).toFixed(1)}sn...`, "warn");
+          await new Promise(r => setTimeout(r, waitMs)); continue;
+        }
+        if (res.status >= 500) { addSystemLog(`Yavaşlık (HTTP ${res.status}). Yeniden deneme (${i + 1}/${retries}) - ${(totalDelay / 1000).toFixed(1)}sn...`, "warn"); await new Promise(r => setTimeout(r, totalDelay)); continue; }
         throw new Error(`HTTP Error ${res.status}`);
       } catch (err) {
         if (err.message.startsWith('HTTP_FAIL_') || err.message.includes('Oturum süresi doldu')) throw err;
