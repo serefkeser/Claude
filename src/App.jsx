@@ -475,8 +475,8 @@ const AI_CONFIG = {
   TEMPERATURE: 0.8,
   MAX_OUTPUT_TOKENS: 150,
   SCENE_COUNT: 3,
-  GEMINI_MODEL: 'gemini-2.5-flash-preview-09-2025',
-  OCR_MODELS: ['gemini-2.5-flash-preview-09-2025', 'gemini-1.5-flash', 'gemini-1.5-pro']
+  GEMINI_MODEL: 'gemini-3.5-flash',
+  OCR_MODELS: ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite-preview']
 };
 
 // ============================================================================
@@ -501,9 +501,10 @@ const AI_PROVIDERS = {
     supportsMedia: true,
     supportsSearch: true,
     defaultModels: [
-      { id: 'gemini-2.5-flash-preview-09-2025', label: 'Gemini 2.5 Flash (Preview)' },
-      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-      { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' }
+      { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash (Stabil, önerilen)' },
+      { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Preview)' },
+      { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash-Lite (Preview)' },
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (16 Eki 2026\'da kapanacak)' }
     ],
     listModels: async (key) => {
       if (!key) return null;
@@ -1366,7 +1367,14 @@ const _aiGenerateContent = async (payload) => {
     if (!key) throw new Error('Gemini API key girilmedi. Ayarlar panelinden (AI Sağlayıcı & Model) ekleyin.');
     const model = AIRouter.getModel('gemini') || AI_CONFIG.GEMINI_MODEL;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    return NetworkUtils.fetchWithRetry(url, { method: 'POST', body: JSON.stringify(payload) });
+    try {
+      return await NetworkUtils.fetchWithRetry(url, { method: 'POST', body: JSON.stringify(payload) });
+    } catch (e) {
+      if (e.message === 'HTTP_FAIL_404') {
+        throw new Error(`Model "${model}" bulunamadı (kapatılmış/geçersiz olabilir). AI Sağlayıcı & Model panelinden 🔄 ile listeyi yenileyip güncel bir model seçin.`);
+      }
+      throw e;
+    }
   }
 
   // --- OpenAI uyumlu sağlayıcılar (Groq, OpenRouter) ---
@@ -5088,6 +5096,12 @@ class ErrorBoundary extends React.Component {
               const [modelListLoading, setModelListLoading] = useState({ gemini: false, groq: false, openrouter: false });
               const [showAiSettingsModal, setShowAiSettingsModal] = useState(false);
               const [aiSettingsTab, setAiSettingsTab] = useState(() => AIRouter.getProvider());
+              useEffect(() => {
+                if (showAiSettingsModal && providerKeys[aiSettingsTab] && !modelLists[aiSettingsTab]) {
+                  handleRefreshModels(aiSettingsTab);
+                }
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+              }, [showAiSettingsModal, aiSettingsTab]);
               // Geriye dönük uyum: dosyanın geri kalanı userApiKey'i kullanmıyor,
               // ama Gemini modülü seviyesindeki `apiKey` değişkeni bu yolla senkron kalır.
               const userApiKey = providerKeys.gemini;
@@ -5115,10 +5129,26 @@ class ErrorBoundary extends React.Component {
                 if (list && list.length > 0) {
                   setModelLists(prev => ({ ...prev, [providerId]: list }));
                   addSystemLog(`${AI_PROVIDERS[providerId].label}: ${list.length} model bulundu.`, 'success');
+                  // Kayıtlı model artık güncel listede yoksa (örn. deprecated oldu),
+                  // otomatik olarak listedeki ilk geçerli modele geç.
+                  const currentModel = providerModels[providerId];
+                  if (!list.some(m => m.id === currentModel)) {
+                    const fallback = list[0].id;
+                    handleSelectModel(providerId, fallback);
+                    addSystemLog(`"${currentModel}" artık kullanılamıyor, otomatik olarak "${fallback}" seçildi.`, 'warn');
+                  }
                 } else {
                   addSystemLog(`${AI_PROVIDERS[providerId].label} model listesi alınamadı, varsayılan liste kullanılıyor.`, 'warn');
                 }
               };
+              // Gemini key mevcutsa uygulama açılışında güncel model listesini otomatik
+              // çek — deprecated/kapatılmış modellerin 404 hatası vermesini önler.
+              useEffect(() => {
+                if (providerKeys.gemini && !modelLists.gemini) {
+                  handleRefreshModels('gemini');
+                }
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+              }, []);
 
               const [config, setConfig] = useState(() => loadSavedJSON('ns_config', {
                 duration: '30', aspectRatio: '9:16', videoStyle: 'cinematic', fontStyle: 'modern', imageStyle: 'oil_painting', language: 'tr', subtitles: 'on', resolution: '4K', transition: 'none', outputType: 'video', analysisMode: 'yorumsuz', videoFormat: 'mp4', tip: 'haber', sourceName: '', yorum: '', exportPreset: 'custom', ttsEngine: 'gemini', previewMode: false, customThumbnail: null, abVariation: false, narrationLanguage: 'tr', brandLogo: null, brandText: '', useStockFootage: false, scheduledPublishAt: null
