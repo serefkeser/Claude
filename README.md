@@ -78,6 +78,15 @@ istersen söyle, GitHub Actions ile her push'ta otomatik `npm run build` +
 Pages'e yayın kurabilirim. Vercel/Netlify kullanmak istersen de repo'yu
 bağlaman yeterli, build komutu `npm run build`, çıktı klasörü `dist`.
 
+### GitHub Pages (otomatik, kuruldu)
+
+`.github/workflows/deploy.yml` her `main` push'unda otomatik build alıp
+GitHub Pages'e yayınlıyor. Canlı adres:
+
+**https://serefkeser.github.io/Claude/**
+
+İlk deploy birkaç dakika sürebilir (Actions sekmesinden takip edilebilir).
+
 ## Dosya yapısı
 
 ```
