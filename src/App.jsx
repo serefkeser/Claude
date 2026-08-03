@@ -1353,35 +1353,13 @@ const ocrWithFallback = async (b64Data, imgType, apiKey, logPrefix = 'Görsel') 
 // böylece çağıran kodun geri kalanı hiç değişmeden çalışmaya devam eder.
 // Medya (görsel/video inlineData) veya internet araştırması (google_search)
 // içeren istekler, sağlayıcı ne olursa olsun her zaman Gemini'ye gider.
-const _aiGenerateContent = async (payload) => {
-  const provider = AIRouter.getProvider();
-  const hasMedia = (payload.contents || []).some(c => (c.parts || []).some(p => p.inlineData));
-  const needsSearch = Array.isArray(payload.tools) && payload.tools.some(t => t.google_search);
-  const useGemini = provider === 'gemini' || hasMedia || needsSearch;
-
-  if (useGemini) {
-    if (provider !== 'gemini') {
-      addSystemLog(`${hasMedia ? 'Medya analizi' : 'İnternet araştırması'} sadece Gemini ile çalışır — istek otomatik olarak Gemini'ye yönlendirildi.`, 'warn');
-    }
-    const key = getGeminiApiKey();
-    if (!key) throw new Error('Gemini API key girilmedi. Ayarlar panelinden (AI Sağlayıcı & Model) ekleyin.');
-    const model = AIRouter.getModel('gemini') || AI_CONFIG.GEMINI_MODEL;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    try {
-      return await NetworkUtils.fetchWithRetry(url, { method: 'POST', body: JSON.stringify(payload) });
-    } catch (e) {
-      if (e.message === 'HTTP_FAIL_404') {
-        throw new Error(`Model "${model}" bulunamadı (kapatılmış/geçersiz olabilir). AI Sağlayıcı & Model panelinden 🔄 ile listeyi yenileyip güncel bir model seçin.`);
-      }
-      throw e;
-    }
-  }
-
-  // --- OpenAI uyumlu sağlayıcılar (Groq, OpenRouter) ---
-  const providerCfg = AI_PROVIDERS[provider];
+// OpenAI uyumlu sağlayıcılar (Groq, OpenRouter) için ortak çağrı fonksiyonu.
+// Hem doğrudan seçim hem de Gemini başarısız olduğunda otomatik fallback için kullanılır.
+const _callOpenAICompatible = async (providerId, payload) => {
+  const providerCfg = AI_PROVIDERS[providerId];
   const key = SafeStorage.getItem(providerCfg.keyName) || '';
   if (!key) throw new Error(`${providerCfg.label} API key girilmedi. Ayarlar panelinden (AI Sağlayıcı & Model) ekleyin.`);
-  const model = AIRouter.getModel(provider);
+  const model = AIRouter.getModel(providerId);
   if (!model) throw new Error(`${providerCfg.label} için model seçilmedi.`);
 
   const messages = [];
@@ -1419,6 +1397,69 @@ const _aiGenerateContent = async (payload) => {
       return { candidates: [{ content: { parts: [{ text }] } }] };
     }
   };
+};
+
+const _aiGenerateContent = async (payload) => {
+  const provider = AIRouter.getProvider();
+  const hasMedia = (payload.contents || []).some(c => (c.parts || []).some(p => p.inlineData));
+  const needsSearch = Array.isArray(payload.tools) && payload.tools.some(t => t.google_search);
+  const useGemini = provider === 'gemini' || hasMedia || needsSearch;
+  // Medya/arama gerektirmeyen isteklerde Gemini başarısız olursa otomatik
+  // geçilecek yedek sağlayıcı (key'i girilmiş ilk uygun olan).
+  const canFallback = !hasMedia && !needsSearch;
+  const fallbackProviderId = canFallback
+    ? ['groq', 'openrouter'].find(p => p !== provider && SafeStorage.getItem(AI_PROVIDERS[p].keyName))
+    : null;
+
+  if (useGemini) {
+    if (provider !== 'gemini') {
+      addSystemLog(`${hasMedia ? 'Medya analizi' : 'İnternet araştırması'} sadece Gemini ile çalışır — istek otomatik olarak Gemini'ye yönlendirildi.`, 'warn');
+    }
+    const key = getGeminiApiKey();
+    const model = AIRouter.getModel('gemini') || AI_CONFIG.GEMINI_MODEL;
+    if (!key) {
+      if (fallbackProviderId) {
+        addSystemLog(`Gemini API key girilmedi, otomatik olarak ${AI_PROVIDERS[fallbackProviderId].label}'a geçiliyor...`, 'warn');
+        return _callOpenAICompatible(fallbackProviderId, payload);
+      }
+      throw new Error('Gemini API key girilmedi. Ayarlar panelinden (AI Sağlayıcı & Model) ekleyin.');
+    }
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    try {
+      return await NetworkUtils.fetchWithRetry(url, { method: 'POST', body: JSON.stringify(payload) });
+    } catch (e) {
+      if (e.message === 'HTTP_FAIL_404') {
+        if (fallbackProviderId) {
+          addSystemLog(`Model "${model}" bulunamadı, otomatik olarak ${AI_PROVIDERS[fallbackProviderId].label}'a geçiliyor...`, 'warn');
+          return _callOpenAICompatible(fallbackProviderId, payload);
+        }
+        throw new Error(`Model "${model}" bulunamadı (kapatılmış/geçersiz olabilir). AI Sağlayıcı & Model panelinden 🔄 ile listeyi yenileyip güncel bir model seçin.`);
+      }
+      // 429 (rate limit) tüm denemeler tükendiğinde veya başka bir Gemini
+      // hatasında, medya/arama gerektirmeyen bir istekse ücretsiz alternatif
+      // sağlayıcıya otomatik geç — iş akışı durmasın.
+      if (fallbackProviderId) {
+        addSystemLog(`Gemini isteği başarısız oldu (${e.message}). Otomatik olarak ${AI_PROVIDERS[fallbackProviderId].label}'a geçiliyor...`, 'warn');
+        try {
+          return await _callOpenAICompatible(fallbackProviderId, payload);
+        } catch (e2) {
+          addSystemLog(`${AI_PROVIDERS[fallbackProviderId].label} yedek denemesi de başarısız oldu: ${e2.message}`, 'error');
+          throw e;
+        }
+      }
+      throw e;
+    }
+  }
+
+  try {
+    return await _callOpenAICompatible(provider, payload);
+  } catch (e) {
+    if (fallbackProviderId) {
+      addSystemLog(`${AI_PROVIDERS[provider].label} isteği başarısız oldu (${e.message}). Otomatik olarak ${AI_PROVIDERS[fallbackProviderId].label}'a geçiliyor...`, 'warn');
+      return _callOpenAICompatible(fallbackProviderId, payload);
+    }
+    throw e;
+  }
 };
 
 const _callGeminiAndParse = async (payload) => {
