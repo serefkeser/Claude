@@ -6,51 +6,7 @@ on:
   pull_request:
     branches: [main, develop]
 
-permissions:
-  contents: write
-
 jobs:
-  restore-hermes10-newspaper:
-    name: Restore Hermes 10 newspaper reader
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-      - name: Restore Hermes 10 newspaper reader
-        run: node scripts/restore-hermes10-newspaper-reading.mjs
-      - name: Bump OTONOM patch version
-        run: node scripts/bump-patch-version.mjs
-      - name: Check version consistency
-        run: node scripts/check-version-consistency.mjs
-      - name: Run newspaper regression tests
-        run: npm exec vitest -- run services/api-gateway/src/routes/ai-newspaper.test.ts apps/web/src/lib/newspaperPipeline.test.ts apps/web/src/lib/storyboard.test.ts
-      - name: Run full Vitest suite
-        run: npm test
-      - name: Typecheck web app
-        run: npm run typecheck --workspace=apps/web
-      - name: Typecheck and test API gateway
-        run: npm run typecheck --workspace=services/api-gateway && npm run test --workspace=services/api-gateway
-      - name: Build web app
-        run: npm run build:web
-        env:
-          VITE_API_URL: https://api.seref-keser.workers.dev
-      - name: Commit tested restore
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/web/src/lib/aiClient.ts services/api-gateway/src/routes/ai.ts services/api-gateway/src/routes/ai-newspaper.test.ts services/api-gateway/src/ai/promptBuilder.ts package.json package-lock.json apps/web/package.json apps/web/src/version.ts packages/shared-config/package.json packages/shared-types/package.json packages/shared-utils/package.json services/api-gateway/package.json services/api-gateway/src/index.ts services/api-gateway/src/routes/health.ts services/media-storage/package.json services/video-renderer/package.json services/video-renderer/src/index.ts
-          git commit -m "fix: restore Hermes 10 newspaper vision reader"
-          git push
-
   tests:
     name: Full Vitest suite
     runs-on: ubuntu-latest
