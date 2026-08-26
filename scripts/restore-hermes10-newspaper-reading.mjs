@@ -47,3 +47,4 @@ if (!test.includes('Hermes 10 Vision başlıkları')) {
 fs.writeFileSync(testPath, test);
 
 console.log('Hermes 10 newspaper Vision-first reader restored.');
+// trigger: 2026-08-26
