@@ -31,10 +31,12 @@ jobs:
         run: npm exec vitest -- run apps/web/src/lib/newspaperVisionRecovery.test.ts apps/web/src/lib/newspaperPipeline.test.ts apps/web/src/lib/storyboard.test.ts apps/web/src/lib/newspaperCopy.test.ts
       - name: Run full Vitest suite
         run: npm test
-      - name: Typecheck and build web
-        run: |
-          npm run typecheck
-          npm run build:web
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=apps/web
+      - name: Build web app
+        run: npm run build:web
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
       - name: Commit tested fix
         run: |
           git config user.name "github-actions[bot]"
@@ -43,4 +45,4 @@ jobs:
           git commit -m "fix: fail closed on newspaper OCR disagreement"
           git push
 
-# validation trigger 2026-08-26b
+# validation trigger 2026-08-26c
