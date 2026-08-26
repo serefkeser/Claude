@@ -42,3 +42,5 @@ jobs:
           git add apps/web/src/lib/newspaperVisionRecovery.ts apps/web/src/lib/newspaperVisionRecovery.test.ts apps/web/src/lib/newspaperPipeline.ts apps/web/src/lib/newspaperPipeline.test.ts apps/web/src/lib/storyboard.ts apps/web/src/lib/storyboard.test.ts package.json package-lock.json apps/web/package.json apps/web/src/version.ts packages/shared-config/package.json packages/shared-types/package.json packages/shared-utils/package.json services/api-gateway/package.json services/api-gateway/src/index.ts services/api-gateway/src/routes/health.ts services/media-storage/package.json services/video-renderer/package.json services/video-renderer/src/index.ts
           git commit -m "fix: fail closed on newspaper OCR disagreement"
           git push
+
+# validation trigger 2026-08-26
