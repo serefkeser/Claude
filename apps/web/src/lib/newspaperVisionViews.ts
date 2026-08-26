@@ -109,36 +109,6 @@ function blobToBase64(blob: Blob) {
   });
 }
 
-async function renderView(bitmap: ImageBitmap, spec: NewspaperVisionViewSpec) {
-  const sourceY = Math.max(0, Math.floor(bitmap.height * spec.topRatio));
-  const requestedHeight = Math.max(1, Math.round(bitmap.height * spec.heightRatio));
-  const sourceHeight = Math.min(bitmap.height - sourceY, requestedHeight);
-  const sourceWidth = bitmap.width;
-  const scale = Math.min(1, spec.maxEdge / Math.max(sourceWidth, sourceHeight));
-  const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
-  const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
-
-  const canvas = document.createElement('canvas');
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Gazete Vision çizim alanı oluşturulamadı.');
-
-  context.drawImage(
-    bitmap,
-    0,
-    sourceY,
-    sourceWidth,
-    sourceHeight,
-    0,
-    0,
-    targetWidth,
-    targetHeight,
-  );
-
-  return canvasToJpeg(canvas, spec.quality);
-}
-
 function drawCompositePanel(
   context: CanvasRenderingContext2D,
   bitmap: ImageBitmap,
@@ -196,18 +166,12 @@ export async function prepareNewspaperVisionComposite(blob: Blob, sourceName: st
   }
 }
 
+/**
+ * API yüzeyi korunur; ancak sağlayıcılara artık üç ayrı image[] gönderilmez.
+ * Tam sayfa + üst + alt yakın plan tek JPEG içinde birleştirilir.
+ * Böylece OpenRouter/NVIDIA gibi bazı VLM gateway'lerinde image[1]/image[2]
+ * dönüştürme hatası oluşmazken yakın plan kanıtı korunur.
+ */
 export async function prepareNewspaperVisionViews(blob: Blob, sourceName: string) {
-  const bitmap = await createImageBitmap(blob);
-  try {
-    return await Promise.all(NEWSPAPER_VISION_VIEW_SPECS.map(async spec => {
-      const rendered = await renderView(bitmap, spec);
-      return {
-        name: `${sourceName} · ${spec.label}`,
-        mimeType: 'image/jpeg',
-        data: await blobToBase64(rendered),
-      } satisfies PreparedNewspaperVisionImage;
-    }));
-  } finally {
-    bitmap.close();
-  }
+  return [await prepareNewspaperVisionComposite(blob, sourceName)];
 }
