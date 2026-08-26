@@ -27,6 +27,7 @@ const testPath = 'apps/web/src/lib/newspaperVisionRecovery.test.ts';
 let test = fs.readFileSync(testPath, 'utf8');
 test = test
   .replace("expect(result.rejected[0]?.reason).toBe('başlık yerel OCR metniyle eşleşmedi');", "expect(result.rejected[0]?.reason).toBe('aynı haber kutusundan bağımsız OCR kanıtı yok');")
-  .replace("expect(result.rejected[0]?.reason).toBe('açıklama yerel OCR metniyle eşleşmedi');", "expect(result.rejected[0]?.reason).toBe('aynı haber kutusundan bağımsız OCR kanıtı yok');");
+  .replace("expect(result.rejected[0]?.reason).toBe('açıklama yerel OCR metniyle eşleşmedi');", "expect(result.rejected[0]?.reason).toBe('aynı haber kutusundan bağımsız OCR kanıtı yok');")
+  .replace("expect(wrongNumber.candidates[0].detail).toBe(local.detail);", "expect(wrongNumber.candidates).toHaveLength(0);");
 fs.writeFileSync(testPath, test);
 console.log('Rejected local candidate fallback closed.');
