@@ -1,0 +1,53 @@
+# Deploy Cloudflare Workers
+name: Deploy Workers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'packages/**'
+      - 'package.json'
+      - '.github/workflows/deploy-workers.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy-api-gateway:
+    name: Deploy API Gateway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Ensure social media R2 bucket exists
+        working-directory: services/api-gateway
+        shell: bash
+        run: |
+          if npx wrangler r2 bucket info otonom-social-media >/dev/null 2>&1; then
+            echo "R2 bucket already exists."
+          else
+            npx wrangler r2 bucket create otonom-social-media
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy API Gateway
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "3.114.17"
+          workingDirectory: services/api-gateway
+          command: deploy
+
+      - name: Verify production health
+        run: curl --fail --retry 8 --retry-delay 5 --retry-all-errors https://api.seref-keser.workers.dev/health
