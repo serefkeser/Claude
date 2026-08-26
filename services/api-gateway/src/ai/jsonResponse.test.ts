@@ -37,6 +37,26 @@ describe('AI JSON response parser', () => {
     expect((result.videoSlides as Array<{ topText: string }>)[1].topText).toBe('İKİNCİ HABER');
   });
 
+  it('OpenRouter yarıda kesse bile tamamlanmış 5 gazete haberini kurtarır', () => {
+    const headlines = Array.from({ length: 5 }, (_, index) => ({
+      sourceHeadlineId: `V${index + 1}`,
+      baslik: `Gerçek gazete başlığı ${index + 1}`,
+      aciklama: `Gazetede basılı tam açıklama ${index + 1}.`,
+      onem: 100 - index,
+      x: 5,
+      y: index * 12,
+      w: 45,
+      h: 10,
+    }));
+    const truncated = `{"isContentUnreadable":false,"videoSlides":[],"thumbnailText":"GÜNDEM","sourceName":"Cumhuriyet","gazeteBasliklari":[${headlines.map(item => JSON.stringify(item)).join(',')}, {"baslik":"YARIM`;
+
+    const result = parseAiJsonObject(truncated);
+
+    expect(result.gazeteBasliklari).toHaveLength(5);
+    expect((result.gazeteBasliklari as Array<{ baslik: string }>)[4].baslik).toBe('Gerçek gazete başlığı 5');
+    expect(() => validateHermesNewspaperResponse(truncated)).not.toThrow();
+  });
+
   it('gazete yanıtında en az 5 farklı kaynak başlığı ister', () => {
     const repeatedStory = JSON.stringify({
       videoSlides: Array.from({ length: 6 }, (_, index) => ({
