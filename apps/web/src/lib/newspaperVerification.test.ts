@@ -135,6 +135,22 @@ describe('strict newspaper evidence verification', () => {
     ])).toBe('Skandal okul savunması');
   });
 
+  it('Cumhuriyet yoğun sayfasında iki bağımsız kırpma kenar gürültüsüne rağmen temiz başlığı doğrular', () => {
+    expect(selectVerifiedOcrReading(
+      "Şam'daki tekkelere övgüler düzen Büyükelçi Nuh Yılmaz, Cumhuriyet dönemini eleştirdi",
+      66,
+      [
+        { text: "Şam'daki tekkelere övgüler düzen Büyükelçi Nuh Yılmaz, Cumhuriyet dönemini eleştiGİ A e", confidence: 77 },
+        { text: "Şam'daki tekkelere övgüler düzen Büyükelçi Nuh Yılmaz, Cumhuriyet dönemini eleştirdi LA ACI", confidence: 88 },
+      ],
+    )).toBe("Şam'daki tekkelere övgüler düzen Büyükelçi Nuh Yılmaz, Cumhuriyet dönemini eleştirdi");
+  });
+
+  it('sayı içermeyen para/sembol OCR artığını haber başlığı saymaz', () => {
+    expect(isLikelyCompleteNewspaperHeadline('KÖŞE ATIŞI £ |')).toBe(false);
+    expect(isLikelyCompleteNewspaperHeadline('Bütçe 40 milyar ₺ arttı')).toBe(true);
+  });
+
   it('gazete logosunun kırpılmış parçasını ana manşetten ayırır', () => {
     expect(stripLeadingNewspaperSourceFragment(
       "Cumhuri Silivri'den yine adalet çıkmadı",

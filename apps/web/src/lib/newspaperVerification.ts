@@ -182,6 +182,9 @@ export function isLikelyCompleteNewspaperHeadline(value: string) {
   if (/^[“"'‘’(\[]*\p{Ll}/u.test(text)) return false;
   const first = tokens[0];
   const last = tokens.at(-1) || '';
+  // Para birimi/sembol artığı tek başına bir haber olgusu değildir. Cumhuriyet
+  // örneğindeki “KÖŞE ATIŞI £ |” gibi OCR gürültüsünü başlık havuzuna alma.
+  if (/[₺$€£]/u.test(text) && !/\d/u.test(text)) return false;
   if (/^\d+(?:[.,]\d+)?$/u.test(last)) return false;
   if (['ve', 'ile', 'için', 'göre', 'olarak', 'ancak'].includes(last)) return false;
   if (/(?:mada|mede)$/u.test(last) || /-$/.test(text) || /\b(?:sayfa\s*)?\d+'?(?:de|da|te|ta)$/u.test(last)) return false;
@@ -352,10 +355,42 @@ export function hasStrictOcrConsensus(
   return allTokensHaveIndependentConsensus(primaryTokens, verificationTokens);
 }
 
+function hasRelaxedIndependentCropConsensus(primary: string, verification: string) {
+  const primaryTokens = evidenceTokens(primary).map(token => token.replace(/-$/u, ''));
+  const verificationTokens = evidenceTokens(verification).map(token => token.replace(/-$/u, ''));
+  if (primaryTokens.length < 5 || !verificationTokens.length) return false;
+
+  const primaryFacts = exactFactTokens(primary).sort();
+  const verificationFacts = exactFactTokens(verification).sort();
+  if (primaryFacts.length !== verificationFacts.length
+    || primaryFacts.some((fact, index) => fact !== verificationFacts[index])) return false;
+
+  const remaining = [...verificationTokens];
+  let matched = 0;
+  for (const primaryToken of primaryTokens) {
+    const matchIndex = remaining.findIndex(verificationToken => {
+      if (primaryToken === verificationToken) return true;
+      if (foldTurkishOcrDiacritics(primaryToken) === foldTurkishOcrDiacritics(verificationToken)) return true;
+      if (/\d/u.test(primaryToken) || primaryToken.length < 5 || verificationToken.length < 5) return false;
+      return editDistance(primaryToken, verificationToken) <= Math.max(1, Math.floor(primaryToken.length * 0.18));
+    });
+    if (matchIndex < 0) continue;
+    remaining.splice(matchIndex, 1);
+    matched += 1;
+  }
+  return matched >= primaryTokens.length - 1;
+}
+
 function readingsMutuallyAgree(left: OcrTextReading, right: OcrTextReading) {
   if (left.confidence < MIN_OCR_CONFIDENCE || right.confidence < MIN_OCR_CONFIDENCE) return false;
-  return hasStrictOcrConsensus(left.text, right.text, left.confidence, right.confidence)
-    && hasStrictOcrConsensus(right.text, left.text, right.confidence, left.confidence);
+  if (hasStrictOcrConsensus(left.text, right.text, left.confidence, right.confidence)
+    && hasStrictOcrConsensus(right.text, left.text, right.confidence, left.confidence)) return true;
+
+  // Tolerans yalnız iki bağımsız, yüksek güvenli kırpmanın birbirini desteklediği
+  // aşamada uygulanır. Tek bir tam-sayfa okuması bu yolla kendini doğrulayamaz.
+  // Sayı/skor/yüzde/para olguları yukarıda birebir eşit olmak zorundadır.
+  return hasRelaxedIndependentCropConsensus(left.text, right.text)
+    || hasRelaxedIndependentCropConsensus(right.text, left.text);
 }
 
 /**
