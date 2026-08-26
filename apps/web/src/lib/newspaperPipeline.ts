@@ -65,6 +65,14 @@ function selectPublishableCandidates(candidates: VerifiedNewspaperCandidate[]) {
     .slice(0, MAX_NEWSPAPER_STORIES);
 }
 
+function buildEditorialEvidence(candidates: VerifiedNewspaperCandidate[]) {
+  return candidates
+    .flatMap(candidate => [candidate.text, candidate.detail])
+    .map(normalize)
+    .filter(Boolean)
+    .join(' ');
+}
+
 export function assertLockedNewspaperScript(
   script: NewspaperScriptContract,
   candidates: VerifiedNewspaperCandidate[],
@@ -115,10 +123,15 @@ export function buildLockedNewspaperScript<T extends NewspaperScriptContract>(op
   const firstAiSlide = options.script.videoSlides.find(
     slide => normalize(slide.sourceHeadlineId || '').toUpperCase() === firstCandidate?.id,
   );
+  // Clickbait, gazetenin kendi basılı başlık/spot dilindeki kelimelerden türetilir.
+  // Böylece editoryal çerçeve korunur; kaynakta olmayan ideolojik etiket veya iddia eklenmez.
+  const editorialEvidence = buildEditorialEvidence(selected);
+  const requestedHook = options.script.thumbnailText || firstAiSlide?.topText || '';
   const coverHook = groundedNewspaperHook(
-    options.script.thumbnailText || firstAiSlide?.topText || '',
-    firstCandidate?.text || 'GÜNDEM',
+    requestedHook,
+    editorialEvidence || firstCandidate?.text || 'GÜNDEM',
   );
+  const fallbackHook = groundedNewspaperHook('', firstCandidate?.text || 'GÜNDEM');
   const videoSlides = selected.map(candidate => {
     return {
       sourceHeadlineId: candidate.id,
@@ -137,8 +150,10 @@ export function buildLockedNewspaperScript<T extends NewspaperScriptContract>(op
     ...options.script,
     isContentUnreadable: false,
     videoSlides,
-    thumbnailText: buildVerifiedCoverHook(coverHook),
-    sonSoz: 'Doğru haber, doğrulanmış bilgidir.',
+    thumbnailText: buildVerifiedCoverHook(coverHook || fallbackHook),
+    // Gazete modunda Son Söz storyboard aşamasında doğrulanmış alıntı havuzundan
+    // tekrarsız seçilir. Sabit cümle burada bilerek tutulmaz.
+    sonSoz: '',
     gununSorusu: '',
     lastQuote: '',
     sourceName,
