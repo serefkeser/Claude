@@ -70,9 +70,9 @@ GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI (KRİTİK):
 6. Sayı, tarih, yüzde, para, kişi, kurum ve yer adlarını görselde gördüğün biçimde koru. Emin olmadığın kelimeyi tahmin etmek yerine o haberi atla.
 7. Kalın siyah/kırmızı büyük başlıkları ve belirgin haber kutularını önceliklendir. Reklam, ilan, bulmaca, tarih, gazete logosu/masthead, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
 8. Koordinatlar gazete sayfasının sol üstü 0,0; sağ altı 100,100 olacak şekilde yüzde cinsinden x/y/w/h ver. Kutu mümkün olduğunca başlık ve ona bağlı açıklamayı kapsasın.
-9. Her haber videoda TEK sahnedir. İçerik sırası değişmez: özgün başlık, sonra o başlığa ait açıklama. imagePrompts her zaman [] olmalı; devam sahnelerinde orijinal gazete görseli kullanılacaktır.
+9. Gazete modunda videoSlides alanını TAM OLARAK [] döndür. Sahne metnini burada tekrar etme. Her haberin özgün başlık+açıklaması istemcide gazeteBasliklari üzerinden tek sahneye dönüştürülecek ve orijinal gazete görseli kullanılacak.
 10. thumbnailText 3-4 kelimelik clickbait olmalı; gazetenin kendi başlık/spot dilindeki gerçek vurguya dayanmalı. Kaynakta olmayan siyasi/ideolojik etiket, suçlama, sonuç veya duygu ekleme.
-11. gazeteBasliklari ANA ÇIKTIDIR. videoSlides yalnız yardımcı taslaktır; gazeteBasliklari içindeki her haber istemcide tek ve değiştirilemez sahneye dönüştürülecek.
+11. gazeteBasliklari ANA ÇIKTIDIR. Aynı başlık veya açıklamayı videoSlides, sonSoz, gununSorusu ya da lastQuote içinde tekrar ederek JSON'u büyütme.
 12. En az 5 gerçek haberin başlık+açıklamasını görselden okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için uydurma veya bozuk metin üretme.` : ''}
 
 JSON şeması:
@@ -85,7 +85,8 @@ JSON şeması:
   "lastQuote": string,
   "sourceName": string,
   "gazeteBasliklari": [{"sourceHeadlineId": string, "baslik": string, "aciklama": string, "onem": number, "x": number, "y": number, "w": number, "h": number}]
-}`;
+}
+Gazete modunda şemadaki videoSlides değeri [] olmalıdır.`;
 
   const parts: AiContentPart[] = [];
   const sourceText = input.text?.trim();
