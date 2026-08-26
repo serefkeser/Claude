@@ -4,7 +4,7 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
-  base: '/hermes/',
+  base: '/Claude/',
   resolve: {
     alias: {
       '@otonom/types': path.resolve(__dirname, '../../packages/shared-types/src'),
