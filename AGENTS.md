@@ -114,3 +114,66 @@ A task is done only when all applicable items are true:
 - The real user-facing behavior matches the requested outcome.
 
 If any applicable item above is not verified, report the task as in progress rather than complete.
+
+## 12. Context, routing, codebase scan, and self-improving workflow
+
+These rules capture the useful engineering principles from the user's Vibe Coding reference material without depending on any specific third-party plugin.
+
+### Model/provider routing
+
+- Treat model selection as a routing problem rather than hardcoding one provider everywhere.
+- Route work by capability, cost/quota, latency, and task type when multiple approved providers exist.
+- Keep fallback order explicit and logged. A fallback must not silently change semantics or factual guarantees.
+- Do not add a new provider merely because it is advertised as free; verify API compatibility, limits, licensing, and output quality first.
+
+### Persistent project memory
+
+- Before work begins, restore context from repository truth: `AGENTS.md`, current code, tests, recent relevant commits, logs, and documented architecture.
+- Store durable engineering decisions in the repository, not only in chat memory.
+- When a solved bug reveals a reusable rule, add that rule to tests, docs, or `AGENTS.md` so the same mistake is not rediscovered.
+- Never store secrets, access tokens, private credentials, or user-sensitive data in persistent project memory.
+
+### Context-window / token discipline
+
+- Load only the files and log regions needed for the current task; do not flood context with the entire repository by default.
+- Summarize previously verified findings and reuse exact identifiers/paths instead of repeatedly re-reading large files.
+- When context becomes noisy, reduce it to: goal, known-good behavior, failing evidence, touched files, tests, and unresolved risks.
+- Context compression must never drop factual constraints, user requirements, failing examples, or deployment state.
+
+### Codebase scan before edits
+
+For non-trivial changes, perform a targeted scan before writing code:
+
+1. Entry point / caller.
+2. Data type or contract.
+3. Main implementation.
+4. Existing alternate or legacy implementation.
+5. Tests covering the path.
+6. Config/environment dependencies.
+7. Logging and failure behavior.
+8. Deployment path if the feature is user-facing.
+
+Use this scan to find existing reusable logic and duplicated pipelines before introducing new code.
+
+### Hooks, tools, MCP, and subagents
+
+- External tools are helpers, not authorities. Their results must be validated against repository truth and task requirements.
+- Give each tool/subagent one bounded responsibility with explicit input and expected output.
+- Do not allow multiple agents/tools to write the same file concurrently.
+- Prefer read/diagnose first, then one controlled write path.
+- Hooks and automation should enforce invariant checks (tests, version consistency, secret scanning, formatting where already used), not hide failures.
+- MCP/plugin installation must be justified by a concrete project need; do not install tools speculatively.
+
+### Task observer / meta-skill
+
+After a meaningful task, ask internally:
+
+- What failed?
+- What evidence exposed it?
+- Which rule would have prevented it?
+- Is the lesson project-specific or generally reusable?
+- Should it become a regression test, invariant, log, documentation entry, or AGENTS rule?
+
+Prefer executable learning in this order: regression test > invariant/check > structured diagnostic log > documentation rule.
+
+Do not continuously rewrite the playbook after trivial edits. Update it only when a repeated failure mode, architectural invariant, or durable workflow improvement has been verified.
