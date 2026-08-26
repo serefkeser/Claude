@@ -87,10 +87,12 @@ interface ProviderDefinition {
   extraHeaders?: Record<string, string>;
 }
 
-const DEFAULT_TEXT_ORDER: AiProviderName[] = ['openrouter', 'gemini', 'groq', 'opencode', 'nvidia'];
-const DEFAULT_VISION_ORDER: AiProviderName[] = ['openrouter', 'gemini', 'groq', 'nvidia'];
+const DEFAULT_TEXT_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'groq', 'opencode', 'nvidia'];
+const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'nvidia', 'groq'];
 const PROVIDER_TIMEOUT_MS = 20_000;
 const TTS_TIMEOUT_MS = 60_000;
+const GEMINI_RETRY_DELAY_MS = 750;
+const GEMINI_TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 const HERMES_RESPONSE_SCHEMA = {
   type: 'OBJECT',
@@ -202,7 +204,7 @@ function getProviderDefinitions(env: AiProviderEnv, task: AiTask) {
       supportsVision: true,
       jsonMode: true,
       extraHeaders: {
-        'HTTP-Referer': 'https://serefkeser.github.io/hermes/',
+        'HTTP-Referer': 'https://serefkeser.github.io/Claude/',
         'X-Title': 'Hermes OTONOM',
       },
     } : undefined,
@@ -259,6 +261,16 @@ function toOpenAiContent(content: AiMessage['content'], supportsVision: boolean)
 function errorReason(value: unknown) {
   if (value instanceof Error) return value.message.slice(0, 240);
   return String(value || 'Bilinmeyen sağlayıcı hatası').slice(0, 240);
+}
+
+function errorStatus(value: unknown) {
+  return typeof (value as { status?: unknown })?.status === 'number'
+    ? (value as { status: number }).status
+    : undefined;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>(resolve => setTimeout(resolve, ms));
 }
 
 async function callOpenAiCompatible(
@@ -389,23 +401,38 @@ export async function generateWithFallback(
 
   const attempts: AiProviderAttempt[] = [];
   for (const provider of providers) {
-    try {
-      const text = provider.name === 'gemini'
-        ? await callGemini(provider, request)
-        : await callOpenAiCompatible(provider, request);
-      request.validateResponse?.(text);
-      attempts.push({ provider: provider.name, model: provider.model, ok: true });
-      return { provider: provider.name, model: provider.model, text, attempts };
-    } catch (error) {
-      attempts.push({
-        provider: provider.name,
-        model: provider.model,
-        ok: false,
-        status: typeof (error as { status?: unknown })?.status === 'number'
-          ? (error as { status: number }).status
-          : undefined,
-        reason: errorReason(error),
-      });
+    const providerCalls = provider.name === 'gemini' ? 2 : 1;
+    for (let callIndex = 0; callIndex < providerCalls; callIndex += 1) {
+      try {
+        const text = provider.name === 'gemini'
+          ? await callGemini(provider, request)
+          : await callOpenAiCompatible(provider, request);
+        request.validateResponse?.(text);
+        attempts.push({ provider: provider.name, model: provider.model, ok: true });
+        return { provider: provider.name, model: provider.model, text, attempts };
+      } catch (error) {
+        const status = errorStatus(error);
+        const retryGemini = provider.name === 'gemini'
+          && callIndex === 0
+          && typeof status === 'number'
+          && GEMINI_TRANSIENT_STATUSES.has(status);
+
+        attempts.push({
+          provider: provider.name,
+          model: provider.model,
+          ok: false,
+          status,
+          reason: retryGemini
+            ? `${errorReason(error)} · Gemini kısa gecikmeyle yeniden deneniyor.`
+            : errorReason(error),
+        });
+
+        if (retryGemini) {
+          await sleep(GEMINI_RETRY_DELAY_MS);
+          continue;
+        }
+        break;
+      }
     }
   }
 
