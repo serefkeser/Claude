@@ -108,7 +108,7 @@ describe('newspaper full-vision recovery', () => {
     expect(result.rejected[0]?.reason).toBe('açıklama yerel OCR metniyle eşleşmedi');
   });
 
-  it('aynı haberi yerel OCR ve görsel analizden iki kez eklemez; güçlü yerel metni korur', () => {
+  it('aynı haberi yerel OCR ve görsel analizden iki kez eklemez; doğrulanmış temiz görsel metnini kullanır', () => {
     const local = localCandidate();
     const result = recoverNewspaperCandidatesFromVision({
       localCandidates: [local],
@@ -119,7 +119,41 @@ describe('newspaper full-vision recovery', () => {
 
     expect(result.candidates).toHaveLength(1);
     expect(result.recoveredCount).toBe(0);
-    expect(result.candidates[0]).toMatchObject({ text: local.text, detail: local.detail, confidence: 94 });
+    expect(result.candidates[0]).toMatchObject({
+      text: visionCandidates[0].baslik,
+      detail: visionCandidates[0].aciklama,
+      confidence: 94,
+    });
+  });
+
+  it('görsel okuma OCR yazım hatasını düzeltir ama sayısal olguyu değiştiremez', () => {
+    const local: VerifiedNewspaperCandidate = {
+      id: 'H1',
+      text: 'Tarihin akışı değişti',
+      detail: "SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+      confidence: 88, score: 12000, x: 10, y: 20, w: 900, h: 140,
+    };
+    const cleanProposal: VisionNewspaperCandidate = {
+      baslik: 'Tarihin akışı değişti',
+      aciklama: "Büyük Atatürk'ün ardından 11 aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+      onem: 100,
+      localCropEvidence: "Tarihin akışı değişti Büyük Atatürk'ün ardından 11 aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+    };
+    const corrected = recoverNewspaperCandidatesFromVision({
+      localCandidates: [local],
+      visionCandidates: [cleanProposal],
+      localOcrText: "OCR TAM METİN: Tarihin akışı değişti SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+      maximumStories: 9,
+    });
+    expect(corrected.candidates[0].detail).toBe(cleanProposal.aciklama);
+
+    const wrongNumber = recoverNewspaperCandidatesFromVision({
+      localCandidates: [local],
+      visionCandidates: [{ ...cleanProposal, aciklama: "Büyük Atatürk'ün ardından 12 aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı." }],
+      localOcrText: "OCR TAM METİN: Tarihin akışı değişti SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+      maximumStories: 9,
+    });
+    expect(wrongNumber.candidates[0].detail).toBe(local.detail);
   });
 
   it('tam sayfa OCR sütunu parçalasa bile aynı haber kutusunun yerel yakın okumasıyla doğrular', () => {

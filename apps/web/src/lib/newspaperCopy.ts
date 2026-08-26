@@ -12,6 +12,31 @@ function normalizeForComparison(value: string) {
   return clean(value).toLocaleLowerCase('tr-TR').replace(/[^a-z0-9çğıöşü]+/gi, ' ').trim();
 }
 
+const TURKISH_SPEECH_EXPANSIONS: Array<[RegExp, string]> = [
+  [/\bABD\b/g, 'Amerika Birleşik Devletleri'],
+  [/\bAİHM\b/g, 'Avrupa İnsan Hakları Mahkemesi'],
+  [/\bHSK\b/g, 'Hakimler ve Savcılar Kurulu'],
+  [/\bADD\b/g, 'Atatürkçü Düşünce Derneği'],
+  [/\bCHP\b/g, 'Cumhuriyet Halk Partisi'],
+  [/\bİBB\b/g, 'İstanbul Büyükşehir Belediyesi'],
+  [/\bTBMM\b/g, 'Türkiye Büyük Millet Meclisi'],
+  [/\bTSK\b/g, 'Türk Silahlı Kuvvetleri'],
+  [/\bSGK\b/g, 'Sosyal Güvenlik Kurumu'],
+  [/\bMEB\b/g, 'Millî Eğitim Bakanlığı'],
+  [/\bYÖK\b/g, 'Yükseköğretim Kurulu'],
+];
+
+export function normalizeTurkishSpeech(value: string) {
+  let text = clean(value)
+    .replace(/\b[yY]üzde\s*%\s*(\d+(?:[.,]\d+)?)/g, 'yüzde $1')
+    .replace(/%\s*(\d+(?:[.,]\d+)?)/g, 'yüzde $1')
+    .replace(/\s*&\s*/g, ' ve ');
+  for (const [pattern, replacement] of TURKISH_SPEECH_EXPANSIONS) {
+    text = text.replace(pattern, replacement);
+  }
+  return clean(text);
+}
+
 export function limitNewspaperHook(value: string, fallback: string) {
   const selected = clean(value) || clean(fallback);
   return selected
@@ -48,5 +73,5 @@ export function buildNewspaperNarration(options: {
     throw new Error('Gazete anlatımı kelime sınırına sığmadı; cümle yarıda kesilmedi.');
   }
   const result = words.join(' ').trim();
-  return ensureSentence(result);
+  return ensureSentence(normalizeTurkishSpeech(result));
 }

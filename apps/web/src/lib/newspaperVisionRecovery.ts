@@ -181,7 +181,28 @@ export function recoverNewspaperCandidatesFromVision(options: {
     if (!headline || ordered.some(candidate => isDuplicateHeadline(candidate.text, headline))) continue;
     const localMatch = options.localCandidates.find(candidate => isDuplicateHeadline(candidate.text, headline));
     if (localMatch) {
-      ordered.push({ ...localMatch, recovered: false });
+      // Görsel model aynı haber bölgesini yerel OCR ile yüksek oranda doğruluyorsa,
+      // yazım/kelime hatalarını görseldeki temiz metinle düzeltebilir. Sayı, tarih,
+      // skor, yüzde ve para olguları validateVisionCandidate içinde yine OCR ile
+      // birebir eşleşmek zorundadır. Böylece “SÜYÜK / MN aylık” gibi OCR
+      // bozulmaları seslendirmeye taşınmaz; AI'nin uydurma metni ise geçemez.
+      const localCorrectionEvidence = [
+        proposal.localCropEvidence || '',
+        localMatch.text,
+        localMatch.detail,
+        evidence,
+      ].filter(Boolean).join(' ');
+      const correctionReason = validateVisionCandidate(proposal, localCorrectionEvidence);
+      if (!correctionReason) {
+        ordered.push({
+          ...localMatch,
+          text: headline,
+          detail: normalizeVisibleText(proposal.aciklama),
+          recovered: false,
+        });
+      } else {
+        ordered.push({ ...localMatch, recovered: false });
+      }
       continue;
     }
 
