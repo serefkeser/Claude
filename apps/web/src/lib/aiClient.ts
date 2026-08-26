@@ -5,6 +5,7 @@ import {
   MAX_NEWSPAPER_STORIES,
   type VerifiedNewspaperCandidate,
 } from './newspaperPipeline';
+import { prepareNewspaperVisionViews } from './newspaperVisionViews';
 import { fetchWithNetworkRetry } from './networkRetry';
 import type { VisionNewspaperCandidate } from './newspaperVisionRecovery';
 
@@ -13,7 +14,7 @@ const MAX_ANALYSIS_IMAGES = 3;
 const MAX_IMAGE_EDGE = 1600;
 const MAX_NEWSPAPER_IMAGE_EDGE = 2600;
 const ACCESS_TOKEN_STORAGE_KEY = 'hermes_ai_access_token';
-const ANALYZE_REQUEST_TIMEOUT_MS = 70_000;
+const ANALYZE_REQUEST_TIMEOUT_MS = 120_000;
 const TTS_REQUEST_TIMEOUT_MS = 70_000;
 
 export interface HermesVideoSlide {
@@ -65,6 +66,12 @@ interface ApiEnvelope<T> {
   success: boolean;
   data?: T;
   error?: { message?: string };
+}
+
+interface AnalysisImage {
+  name: string;
+  mimeType: string;
+  data: string;
 }
 
 function readBlobAsDataUrl(blob: Blob) {
@@ -153,6 +160,17 @@ async function mediaToAnalysisImage(media: MediaFile, maxImageEdge = MAX_IMAGE_E
   };
 }
 
+async function mediaToNewspaperVisionViews(media: MediaFile): Promise<AnalysisImage[]> {
+  const url = media.url || media.thumbnailUrl;
+  if (!url || media.type !== 'image') {
+    throw new Error('Gazete çoklu Vision görünümü için geçerli bir gazete görseli gerekli.');
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${media.name} gazete Vision analizi için açılamadı.`);
+  const source = await response.blob();
+  return prepareNewspaperVisionViews(source, media.name || 'Gazete');
+}
+
 async function request<T>(path: string, body: unknown, allowTokenPrompt = true): Promise<T> {
   const accessToken = localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)?.trim();
   const startedAt = performance.now();
@@ -171,9 +189,13 @@ async function request<T>(path: string, body: unknown, allowTokenPrompt = true):
       'warn',
     ), 25_000));
     progressHandles.push(window.setTimeout(() => writeSystemLog(
-      'AI analizi halen sürüyor; 70 saniyelik güvenlik zaman aşımı aktif.',
+      'AI analizi halen sürüyor; gazete Vision için 120 saniyelik güvenlik zaman aşımı aktif.',
       'warn',
-    ), 45_000));
+    ), 60_000));
+    progressHandles.push(window.setTimeout(() => writeSystemLog(
+      'AI analizi uzun sürüyor; son Vision fallback yanıtı bekleniyor.',
+      'warn',
+    ), 90_000));
   }
 
   writeSystemLog(`AI API isteği gönderiliyor: ${path}`);
@@ -344,14 +366,20 @@ export async function analyzeForVideo(options: {
     .filter(item => item.type === 'image' || item.type === 'video')
     .slice(0, MAX_ANALYSIS_IMAGES);
 
-  const settled = await Promise.allSettled(imageCandidates.map(media => mediaToAnalysisImage(
-    media,
-    options.inputType === 'gazete' ? MAX_NEWSPAPER_IMAGE_EDGE : MAX_IMAGE_EDGE,
-    options.inputType === 'gazete' ? 0.92 : 0.82,
-  )));
-  const images = settled
-    .filter((item): item is PromiseFulfilledResult<NonNullable<Awaited<ReturnType<typeof mediaToAnalysisImage>>>> => item.status === 'fulfilled' && Boolean(item.value))
-    .map(item => item.value);
+  let images: AnalysisImage[] = [];
+  if (options.inputType === 'gazete' && imageCandidates.length === 1 && imageCandidates[0].type === 'image') {
+    images = await mediaToNewspaperVisionViews(imageCandidates[0]);
+    writeSystemLog('Gazete Vision hazırlığı: tam sayfa + üst yakın plan + alt yakın plan olmak üzere 3 görünüm hazırlandı.');
+  } else {
+    const settled = await Promise.allSettled(imageCandidates.map(media => mediaToAnalysisImage(
+      media,
+      options.inputType === 'gazete' ? MAX_NEWSPAPER_IMAGE_EDGE : MAX_IMAGE_EDGE,
+      options.inputType === 'gazete' ? 0.92 : 0.82,
+    )));
+    images = settled
+      .filter((item): item is PromiseFulfilledResult<NonNullable<Awaited<ReturnType<typeof mediaToAnalysisImage>>>> => item.status === 'fulfilled' && Boolean(item.value))
+      .map(item => item.value);
+  }
 
   if (options.inputType === 'gazete' && images.length === 0) {
     throw new Error('Gazete görseli Vision analizi için hazırlanamadı.');
@@ -369,7 +397,7 @@ export async function analyzeForVideo(options: {
   };
 
   if (options.inputType === 'gazete') {
-    writeSystemLog('Hermes 10 gazete okuma modu: tam gazete görseli doğrudan Vision modele gönderiliyor.');
+    writeSystemLog('Hermes 10 gazete okuma modu: aynı sayfanın tam görünümü ve örtüşen yakın planları Vision modele gönderiliyor.');
     writeSystemLog('Yerel Tesseract OCR gazete başlığını veya cümlesini değiştirmeyecek.');
   }
 
@@ -378,7 +406,7 @@ export async function analyzeForVideo(options: {
     text: [
       options.text.trim(),
       options.inputType === 'gazete'
-        ? 'GAZETE OKUMA: Görseldeki gerçek haber başlıklarını ve onlara bağlı açıklamaları doğrudan görselden oku. Her haber tek sahne olacaktır. Okuyamadığın kelimeyi uydurma.'
+        ? 'GAZETE OKUMA: Gönderilen görseller aynı gazete sayfasının tam görünümü ve yakın planlarıdır. Tek bir sayfa gibi birlikte değerlendir; tekrar eden haberi bir kez say. Görseldeki gerçek haber başlıklarını ve onlara fiziksel olarak bağlı açıklamaları doğrudan görselden oku. Okuyamadığın kelimeyi uydurma.'
         : '',
     ].filter(Boolean).join('\n\n'),
     images,
