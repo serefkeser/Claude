@@ -51,6 +51,7 @@ export interface AiGenerationRequest {
   temperature?: number;
   maxTokens?: number;
   responseFormat?: 'text' | 'json';
+  responseSchema?: 'hermes' | 'newspaper';
   validateResponse?: (text: string) => void;
 }
 
@@ -88,9 +89,10 @@ interface ProviderDefinition {
 }
 
 const DEFAULT_TEXT_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'groq', 'opencode', 'nvidia'];
-const DEFAULT_VISION_ORDER: AiProviderName[] = ['nvidia', 'gemini', 'openrouter', 'groq'];
+const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'openrouter'];
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_VISION_TIMEOUT_MS = 40_000;
+const OPENROUTER_VISION_TIMEOUT_MS = 55_000;
 const TTS_TIMEOUT_MS = 60_000;
 const GEMINI_RETRY_DELAY_MS = 750;
 const GEMINI_TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
@@ -131,6 +133,32 @@ const HERMES_RESPONSE_SCHEMA = {
     },
   },
   required: ['isContentUnreadable', 'videoSlides', 'thumbnailText', 'sonSoz', 'gununSorusu', 'lastQuote', 'sourceName', 'gazeteBasliklari'],
+};
+
+const NEWSPAPER_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    isContentUnreadable: { type: 'BOOLEAN' },
+    sourceName: { type: 'STRING' },
+    thumbnailText: { type: 'STRING' },
+    gazeteBasliklari: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          baslik: { type: 'STRING' },
+          aciklama: { type: 'STRING' },
+          onem: { type: 'NUMBER' },
+          x: { type: 'NUMBER' },
+          y: { type: 'NUMBER' },
+          w: { type: 'NUMBER' },
+          h: { type: 'NUMBER' },
+        },
+        required: ['baslik', 'aciklama', 'onem', 'x', 'y', 'w', 'h'],
+      },
+    },
+  },
+  required: ['isContentUnreadable', 'sourceName', 'thumbnailText', 'gazeteBasliklari'],
 };
 
 async function withRequestTimeout<T>(
@@ -274,6 +302,11 @@ function sleep(ms: number) {
   return new Promise<void>(resolve => setTimeout(resolve, ms));
 }
 
+function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRequest) {
+  if (request.task === 'vision' && provider.name === 'openrouter') return OPENROUTER_VISION_TIMEOUT_MS;
+  return PROVIDER_TIMEOUT_MS;
+}
+
 async function callOpenAiCompatible(
   provider: ProviderDefinition,
   request: AiGenerationRequest,
@@ -324,7 +357,7 @@ async function callOpenAiCompatible(
       : content?.map(part => part.text || '').join('') || '').trim();
     if (!text) throw new Error('Sağlayıcı boş yanıt döndürdü.');
     return text;
-  }, PROVIDER_TIMEOUT_MS, `Sağlayıcı ${provider.name}`);
+  }, providerTimeoutMs(provider, request), `Sağlayıcı ${provider.name}`);
 }
 
 function toGeminiParts(content: AiMessage['content']) {
@@ -350,6 +383,9 @@ async function callGemini(
       role: message.role === 'assistant' ? 'model' : 'user',
       parts: toGeminiParts(message.content),
     }));
+  const schema = request.responseSchema === 'newspaper'
+    ? NEWSPAPER_RESPONSE_SCHEMA
+    : HERMES_RESPONSE_SCHEMA;
 
   return withRequestTimeout(async signal => {
     const response = await fetch(
@@ -364,7 +400,7 @@ async function callGemini(
             temperature: request.temperature ?? 0.25,
             maxOutputTokens: request.maxTokens ?? 4096,
             ...(request.responseFormat === 'json'
-              ? { responseMimeType: 'application/json', responseSchema: HERMES_RESPONSE_SCHEMA }
+              ? { responseMimeType: 'application/json', responseSchema: schema }
               : {}),
           },
         }),
