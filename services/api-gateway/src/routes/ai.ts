@@ -48,31 +48,24 @@ function parseOcrHeadlineCandidates(sourceText: string): OcrHeadlineCandidate[] 
 function buildEmergencyScript(body: AnalyzeInput) {
   const sourceName = body.config?.sourceName?.trim() || body.images?.[0]?.name?.trim() || 'OTONOM';
   const sourceText = body.text?.trim() || '';
-  const ocrCandidates = parseOcrHeadlineCandidates(sourceText);
-  const rankedOcrLines = sourceText
-    .split(/\n+/)
-    .map(line => line.match(/^\d+\.\s+\[boyut=[^\]]+\]\s+(.+)$/)?.[1]?.replace(/\s+/g, ' ').trim() || '')
-    .filter(line => line.split(/\s+/).length >= 3 && !/^(cumhuriyet|\d{1,2}\s+\p{L}+\s+\d{4})/iu.test(line));
-  const sourceLines = (ocrCandidates.length ? ocrCandidates.map(candidate => candidate.text) : rankedOcrLines.length >= 5 ? rankedOcrLines : sourceText
+  const sourceLines = sourceText
     .split(/(?<=[.!?])\s+|\n+/)
     .map(sentence => sentence.replace(/\s+/g, ' ').trim())
     .filter(sentence => sentence.split(/\s+/).length >= 3)
-  )
-    .map(sentence => sentence.split(/\s+/).slice(0, 55).join(' '))
     .slice(0, 6);
   const fallbackLines = [
     'Kaynak görsel video akışına alındı. Otomatik içerik çözümleme hizmeti geçici olarak yanıt vermedi.',
     'Gazete sayfası ekranda korunuyor. Okunamayan ayrıntılar hakkında doğrulanmamış bilgi üretilmedi.',
     'Başlıklar özgün sayfa üzerinden incelenebilir. Video, kaynak görünümünü değiştirmeden sunuyor.',
     'Bu geçici akış yalnızca güvenle doğrulanabilen bilgileri kullanıyor. Varsayım veya uydurma ayrıntı eklenmedi.',
-    'Ayrıntılı yapay zekâ çözümlemesi sonraki çalıştırmada yeniden denenecek. Üretim işlemi tamamen durdurulmadı.',
-    'Kaynak sayfa kapanıştan önce yeniden gösteriliyor. Oluşturma kaydı tanılama dosyasına işlendi.',
+    'Ayrıntılı yapay zekâ çözümlemesi sonraki çalıştırmada yeniden denenecek.',
+    'Kaynak sayfa kapanıştan önce yeniden gösteriliyor.',
   ];
   const lines = Array.from({ length: 6 }, (_, index) => sourceLines[index] || fallbackLines[index]);
   return {
     isContentUnreadable: sourceLines.length === 0,
     videoSlides: lines.map((spokenText, index) => ({
-      sourceHeadlineId: ocrCandidates[index]?.id || '',
+      sourceHeadlineId: '',
       sourceHeadline: sourceLines[index] || '',
       topText: sourceLines[index]
         ? sourceLines[index].split(/\s+/).slice(0, 3).join(' ').replace(/[^\p{L}\p{N}\s]/gu, '').toLocaleUpperCase('tr-TR')
@@ -81,9 +74,9 @@ function buildEmergencyScript(body: AnalyzeInput) {
       imagePrompts: [],
     })),
     thumbnailText: `${Math.min(8, Math.max(1, sourceLines.length))} HABER ÖZETİ`,
-    sonSoz: 'Doğru söz, yemin istemez.',
+    sonSoz: '',
     gununSorusu: '',
-    lastQuote: 'Kaynağı izlemeye devam ediyoruz.',
+    lastQuote: '',
     sourceName,
     gazeteBasliklari: [],
   };
@@ -93,7 +86,13 @@ function normalizeHeadline(value: unknown) {
   return String(value || '').toLocaleLowerCase('tr-TR').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
-export function normalizeNewspaperScript(script: Record<string, unknown>, ocrCandidates: OcrHeadlineCandidate[]) {
+/**
+ * Hermes 10 gazete davranışı:
+ * - Tam gazete görselinden Vision tarafından çıkarılan gazeteBasliklari ana kaynaktır.
+ * - Yerel OCR adayları bu metni ezemez veya yeniden yazamaz.
+ * - Her başlık yalnız bir sahneye dönüşür: özgün başlık + görselden okunan açıklama.
+ */
+export function normalizeNewspaperScript(script: Record<string, unknown>, _ocrCandidates: OcrHeadlineCandidate[] = []) {
   const rawHeadlines = Array.isArray(script.gazeteBasliklari)
     ? script.gazeteBasliklari.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
     : [];
@@ -102,70 +101,45 @@ export function normalizeNewspaperScript(script: Record<string, unknown>, ocrCan
       const key = normalizeHeadline(headline.baslik);
       return key && all.findIndex(candidate => normalizeHeadline(candidate.baslik) === key) === index;
     })
+    .filter(headline => String(headline.aciklama || '').replace(/\s+/g, ' ').trim().length > 0)
     .sort((left, right) => {
       const importance = Number(right.onem || 0) - Number(left.onem || 0);
       if (importance) return importance;
       return Number(right.w || 0) * Number(right.h || 0) - Number(left.w || 0) * Number(left.h || 0);
     })
     .slice(0, 9);
-  const rawSlides = Array.isArray(script.videoSlides)
-    ? script.videoSlides.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    : [];
-  if (ocrCandidates.length) {
-    const candidates = ocrCandidates.slice(0, 9);
-    const videoSlides = candidates.map(candidate => {
-      const spokenText = [candidate.text, candidate.detail].filter(Boolean).join('. ');
-      return {
-        sourceHeadlineId: candidate.id,
-        sourceHeadline: candidate.text,
-        topText: candidate.text.split(/\s+/).slice(0, 4).join(' '),
-        spokenText: /[.!?]$/.test(spokenText) ? spokenText : `${spokenText}.`,
-        imagePrompts: [],
-      };
-    });
+
+  if (headlines.length < 5) {
     return {
       ...script,
-      videoSlides,
-      thumbnailText: `${videoSlides.length} HABER ÖZETİ`,
+      isContentUnreadable: true,
       visionGazeteBasliklari: headlines,
-      gazeteBasliklari: candidates.map((candidate, index) => ({
-        sourceHeadlineId: candidate.id,
-        baslik: candidate.text,
-        aciklama: candidate.detail,
-        onem: Math.max(1, 100 - index * 10),
-        x: candidate.x, y: candidate.y, w: candidate.w, h: candidate.h,
-      })),
+      gazeteBasliklari: headlines,
     };
   }
 
-  if (headlines.length < 5) return { ...script, visionGazeteBasliklari: headlines };
-
-  const usedSlides = new Set<number>();
-  const videoSlides = headlines.map(headline => {
-    const headlineKey = normalizeHeadline(headline.baslik);
-    const slideIndex = rawSlides.findIndex((slide, index) => {
-      if (usedSlides.has(index)) return false;
-      const sourceKey = normalizeHeadline(slide.sourceHeadline);
-      return sourceKey && (sourceKey.includes(headlineKey) || headlineKey.includes(sourceKey));
-    });
-    if (slideIndex >= 0) usedSlides.add(slideIndex);
-    const slide = slideIndex >= 0 ? rawSlides[slideIndex] : {};
-    const sourceHeadline = String(headline.baslik || '').trim();
-    const description = String(headline.aciklama || '').trim();
+  const videoSlides = headlines.map((headline, index) => {
+    const sourceHeadline = String(headline.baslik || '').replace(/\s+/g, ' ').trim();
+    const description = String(headline.aciklama || '').replace(/\s+/g, ' ').trim();
+    const spokenText = `${sourceHeadline}. ${description}`.replace(/\s+/g, ' ').trim();
     return {
-      sourceHeadlineId: String(slide.sourceHeadlineId || headline.sourceHeadlineId || '').trim(),
+      sourceHeadlineId: `H${index + 1}`,
       sourceHeadline,
-      topText: String(slide.topText || sourceHeadline.split(/\s+/).slice(0, 3).join(' ')).trim(),
-      spokenText: String(slide.spokenText || `${sourceHeadline}. ${description}`).trim(),
+      topText: sourceHeadline,
+      spokenText: /[.!?]$/.test(spokenText) ? spokenText : `${spokenText}.`,
       imagePrompts: [],
     };
   });
+
   return {
     ...script,
+    isContentUnreadable: false,
     videoSlides,
-    thumbnailText: `${videoSlides.length} HABER ÖZETİ`,
     visionGazeteBasliklari: headlines,
-    gazeteBasliklari: headlines,
+    gazeteBasliklari: headlines.map((headline, index) => ({
+      ...headline,
+      sourceHeadlineId: `H${index + 1}`,
+    })),
   };
 }
 
@@ -243,14 +217,11 @@ aiRoutes.post('/analyze', async c => {
     const generated = await generateWithFallback(c.env, {
       task: images.length ? 'vision' : 'text',
       messages: buildAnalyzeMessages({ ...body, images }),
-      temperature: 0.2,
+      temperature: body.inputType === 'gazete' ? 0.1 : 0.2,
       maxTokens: 6144,
       responseFormat: 'json',
       validateResponse: body.inputType === 'gazete'
-        ? text => validateHermesNewspaperResponse(text, ocrCandidates.map(candidate => ({
-          id: candidate.id,
-          text: candidate.text,
-        })))
+        ? text => validateHermesNewspaperResponse(text, [])
         : validateHermesScriptResponse,
     });
     const parsedScript = parseAiJsonObject(generated.text);
