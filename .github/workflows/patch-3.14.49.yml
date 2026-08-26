@@ -75,11 +75,10 @@ jobs:
               'const COMPOSITE_WIDTH = 2600;\nconst COMPOSITE_HEIGHT = 2200;\nconst COMPOSITE_PADDING = 24;\nconst COMPOSITE_GAP = 24;\nconst COMPOSITE_JPEG_QUALITY = 0.9;',
               'const COMPOSITE_WIDTH = 2200;\nconst COMPOSITE_HEIGHT = 1900;\nconst COMPOSITE_PADDING = 20;\nconst COMPOSITE_GAP = 20;\nconst COMPOSITE_JPEG_QUALITY = 0.84;',
           )
-
           replace(
               'apps/web/src/lib/newspaperVisionViews.test.ts',
-              "    expect(image).toEqual(expect.objectContaining({ mimeType: 'image/jpeg' }));\n    expect(image.data.length).toBeGreaterThan(100);",
-              "    expect(image).toEqual(expect.objectContaining({ mimeType: 'image/jpeg' }));\n    expect(image.data.length).toBeGreaterThan(100);\n    expect(image.data.length).toBeLessThan(20_000_000);",
+              '    expect(layout.width).toBe(2600);\n    expect(layout.height).toBe(2200);',
+              '    expect(layout.width).toBe(2200);\n    expect(layout.height).toBe(1900);',
           )
           PY
 
