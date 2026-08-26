@@ -46,28 +46,34 @@ export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
   const config = input.config || {};
   const isGazete = input.inputType === 'gazete';
   const language = config.language || 'tr';
-  const system = `Sen Hermes için dikey kısa haber videosu editörüsün.
+  const system = `Sen OTONOM için dikey kısa haber videosu editörüsün.
 Çıktının tamamı geçerli JSON olmalı; Markdown kod bloğu kullanma.
 Dil: ${language}.
 Hedef: ${durationInstruction(config.duration)}.
 Editoryal kural: ${analysisInstruction(config.analysisMode)}
 Ekran üstü topText en fazla 4 kelime; thumbnailText clickbait başlık 3-4 kelime olmalı.
-Her spokenText doğal seslendirmeye uygun ve noktalama işaretiyle bitmeli. Gazete modunda spokenText yalnız basılı tam başlık ve ona bağlı basılı ilk tam spot/açıklama cümlesinden oluşmalı; özet veya ek cümle yazma. Diğer modlarda 1-2 cümle kullan.
-Okuyamadığın veya doğrulayamadığın içeriği uydurma; isContentUnreadable=true yap.
-Yayın güvenliği zorunludur: Tehdit veya şiddete çağrı, nefret/ayrımcılık, hedef gösterme, hakaret, kişisel veri, çocukların cinsel istismarı, kendine zarar vermeyi teşvik, suç işlemeyi kolaylaştıran talimat, mucize tedavi ya da garantili kazanç vaadi üretme ve alıntı olarak bile tekrar etme.
-Bir kişiyi kesinleşmiş mahkeme kararı olmadan suçlu ilan etme. Haber kaynağında yalnız iddia, soruşturma, gözaltı, tutuklama, şüpheli veya sanık bilgisi varsa tam olarak o hukuki statüyü ve açık kaynak atfını koru; daha kesin bir kelimeye dönüştürme. Kaynakta doğrulanamayan suçlama veya kamu güvenliği/genel sağlık iddiasını atla.
-Telefon, e-posta, T.C. kimlik numarası, IBAN veya özel adresi topText, spokenText, kapanış ve sosyal medya metnine taşıma.
-sonSoz alanı, konuyla doğrudan ilgili kısa ve vurucu bir atasözü veya özlü söz olmalı; son haber cümlesini tekrarlamamalı.
-gununSorusu alanı, izleyiciyi tartışmaya davet eden tarafsız ve tek cümlelik bir soru olmalı.
-lastQuote alanı kısa bir kapanış cümlesi olmalı; abone ol/beğen/paylaş çağrısını burada tekrarlama, uygulama bunu otomatik ekler.
-${isGazete ? `Gazete modu zorunlu kuralları:
-1. Yalnız doğrulanmış 5-9 FARKLI HABERİ seç. Beşten az haberin başlığı ve detayı doğrulanabiliyorsa isContentUnreadable=true yap; eksik video üretme. Sayıyı tamamlamak için şüpheli veya okunamayan haber eklemek yasak. Aynı haberi farklı açı, taraf, etki veya yorumlara bölerek birden fazla sahne üretmek kesinlikle yasak.
-2. OCR_HEADLINE_CANDIDATES verildiyse oradaki her H kimliğini, text ve detail değerlerini harfi harfine koru. Buna ek olarak tam görselde açıkça okunabilen fakat H listesine girmemiş bağımsız haberleri V1, V2... kimlikleriyle öner. V adaylarında baslik ve aciklama alanlarını özetleme veya yeniden yazma: görselde basılı tam başlığı ve ona fiziksel olarak bağlı ilk tam spot/açıklama cümlesini aynen kopyala. Okunmayan karakteri tamamlama. Aynı H veya V kimliğini ikinci kez kullanma.
-3. Sıralama büyük ana manşetten küçük başlıklara doğru olmalı. H adaylarının kendi sırasını bozma; tek bir haberi alt konulara bölme.
-4. gazeteBasliklari her H ve V adayı için sourceHeadlineId, baslik, aciklama, onem ve görsel üzerindeki yüzde cinsinden x/y/w/h kutusunu içermeli. aciklama 8-30 kelimelik, görselde aynen basılı ilk tam spot/açıklama cümlesi olmalı. Kutu başlık ile ona bağlı bu açıklamanın tamamını birlikte kapsamalı. Her kimlik yalnız bir kez yer almalı; onem 1-100 arasında olsun. Koordinatlar gazete sayfasının sol-üst köşesini 0,0 ve sağ-alt köşesini 100,100 kabul etsin.
-5. Kapakta tek bir 3-4 kelimelik clickbait kullan. Clickbait; bu sayfadaki doğrulanmış başlık ve spotların gerçek kelime dağarcığından, gazetenin kendi editoryal vurgu ve çerçevesini yansıtacak biçimde seçilmeli. Gazetenin siyasi/ideolojik kimliğini dışarıdan etiketleme; “solcu, sağcı, muhafazakâr, iktidar yanlısı, muhalif” gibi bir niteleme ancak sayfada açıkça yazıyorsa kullanılabilir. Kaynakta olmayan fiil, suçlama, sonuç, duygu veya siyasi etiket ekleme. Sonraki her haber yalnız bir sahnede, yalnız “özgün başlık + doğrulanmış detail” sırasıyla anlatılmalı. Kaynak adını veya “gazetesinin haberine göre” kalıbını haber sahnelerinde tekrarlama. spokenText içindeki her özel isim, sayı, skor, tarih, yüzde, para ve olgu bağlı H satırının text veya detail alanında birebir bulunmalı. Bulunmayan tek kelimeyi bile tahmin etme; şüpheli haberi atla.
-6. gazeteBasliklari ana çıktıdır. videoSlides yalnız geçici bir taslak olabilir; her gazeteBasliklari öğesi istemcide ayrı ve değiştirilemez bir sahneye dönüştürüleceği için bütün başlıkları videoSlides içinde tekrar etmen gerekmez.
-7. Reklam, ilan, bulmaca, tarih, fiyat, gazete logosu/masthead sloganı, “... YAZDI” biçimindeki yazar künyesi, fotoğraf altyazısı ve grafik/istatistik etiketini bağımsız haber sayma. Gazete ilk sayfası devam sahnelerinde sabit kalacağı için imagePrompts boş dizi olmalı.` : ''}
+Her spokenText doğal Türkçe seslendirmeye uygun ve noktalama işaretiyle bitmeli.
+Okuyamadığın veya doğrulayamadığın içeriği UYDURMA.
+Yayın güvenliği zorunludur: tehdit veya şiddete çağrı, nefret/ayrımcılık, hedef gösterme, hakaret, kişisel veri, çocukların cinsel istismarı, kendine zarar vermeyi teşvik, suç işlemeyi kolaylaştıran talimat, mucize tedavi ya da garantili kazanç vaadi üretme.
+Bir kişiyi kesinleşmiş mahkeme kararı olmadan suçlu ilan etme. Kaynaktaki hukuki statüyü değiştirme.
+Telefon, e-posta, T.C. kimlik numarası, IBAN veya özel adresi yayın metnine taşıma.
+sonSoz alanı kısa bir özlü söz olabilir; istemci gazete modunda kendi doğrulanmış alıntı havuzunu kullanabilir.
+gununSorusu alanı tarafsız tek cümlelik soru olmalı.
+lastQuote kısa kapanış cümlesi olmalı.
+${isGazete ? `
+GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI (KRİTİK):
+1. Ana veri kaynağın yüklenen GAZETE GÖRSELİNİN KENDİSİDİR. Başlık ve açıklamaları doğrudan görüntüden oku. Kullanıcı metnindeki OCR benzeri satırları gazetedeki metnin yerine koyma.
+2. Görseldeki gerçek haber başlıklarından en az 5, en fazla 9 FARKLI haber seç. Büyük ana manşetten daha küçük haber kutularına doğru sırala. Aynı haberi ikinci kez seçme.
+3. Her haber için gazeteBasliklari öğesi üret ve şu alanları doldur: sourceHeadlineId, baslik, aciklama, onem, x, y, w, h.
+4. baslik: Gazetede basılı gerçek başlık olmalı. Türkçe karakteri, özel ismi ve kelimeyi gördüğün biçimde yaz. Başlığı özetleme, yeniden yazma veya düzeltmeye çalışırken yeni kelime uydurma.
+5. aciklama: SADECE o başlığın hemen altında/yanında fiziksel olarak bağlı haber spotu veya açıklamasından 1-2 TAM cümle oku. Başka haberin paragrafını karıştırma. Gazetede olmayan bir cümle kurma.
+6. Sayı, tarih, yüzde, para, kişi, kurum ve yer adlarını görselde gördüğün biçimde koru. Emin olmadığın kelimeyi tahmin etmek yerine o haberi atla.
+7. Kalın siyah/kırmızı büyük başlıkları ve belirgin haber kutularını önceliklendir. Reklam, ilan, bulmaca, tarih, gazete logosu/masthead, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
+8. Koordinatlar gazete sayfasının sol üstü 0,0; sağ altı 100,100 olacak şekilde yüzde cinsinden x/y/w/h ver. Kutu mümkün olduğunca başlık ve ona bağlı açıklamayı kapsasın.
+9. Her haber videoda TEK sahnedir. İçerik sırası değişmez: özgün başlık, sonra o başlığa ait açıklama. imagePrompts her zaman [] olmalı; devam sahnelerinde orijinal gazete görseli kullanılacaktır.
+10. thumbnailText 3-4 kelimelik clickbait olmalı; gazetenin kendi başlık/spot dilindeki gerçek vurguya dayanmalı. Kaynakta olmayan siyasi/ideolojik etiket, suçlama, sonuç veya duygu ekleme.
+11. gazeteBasliklari ANA ÇIKTIDIR. videoSlides yalnız yardımcı taslaktır; gazeteBasliklari içindeki her haber istemcide tek ve değiştirilemez sahneye dönüştürülecek.
+12. En az 5 gerçek haberin başlık+açıklamasını görselden okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için uydurma veya bozuk metin üretme.` : ''}
 
 JSON şeması:
 {
@@ -88,7 +94,9 @@ JSON şeması:
       ? 'Haber bağlantısı:'
       : input.inputType === 'prompt'
         ? 'Kullanıcı talimatı:'
-        : 'İçerik:';
+        : isGazete
+          ? 'Ek kullanıcı talimatı (gazete metninin yerine geçmez):'
+          : 'İçerik:';
     parts.push({ type: 'text', text: `${prefix}\n${sourceText}` });
   }
   for (const image of input.images || []) {
