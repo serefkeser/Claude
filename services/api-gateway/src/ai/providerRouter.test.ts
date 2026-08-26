@@ -131,6 +131,57 @@ describe('AI provider fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('gazete için Geminiye yalnız kompakt gazete şemasını gönderir', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"isContentUnreadable":false,"sourceName":"Cumhuriyet","thumbnailText":"GÜNDEM","gazeteBasliklari":[]}' }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_VISION_PROVIDER_ORDER: 'gemini',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+    });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as {
+      generationConfig: { responseSchema: { properties: Record<string, unknown> } };
+    };
+    expect(body.generationConfig.responseSchema.properties).toHaveProperty('gazeteBasliklari');
+    expect(body.generationConfig.responseSchema.properties).not.toHaveProperty('videoSlides');
+    expect(body.generationConfig.responseSchema.properties).not.toHaveProperty('sonSoz');
+  });
+
+  it('varsayılan production Vision zincirinde NVIDIA ve Groqyu çağırmaz', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"isContentUnreadable":false,"sourceName":"Gazete","thumbnailText":"GÜNDEM","gazeteBasliklari":[]}' }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      OPENROUTER_API_KEY: 'openrouter-test',
+      NVIDIA_API_KEY: 'nvidia-test',
+      GROQ_API_KEY: 'groq-test',
+      ALLOW_NVIDIA_TRIAL: 'true',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+    });
+
+    expect(result.provider).toBe('gemini');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('generativelanguage.googleapis.com');
+  });
+
   it('görsel görevinde metin-only OpenCode sağlayıcısını çağırmaz', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"videoSlides":[]}' } }],
@@ -187,6 +238,39 @@ describe('AI provider fallback', () => {
       'https://openrouter.ai/api/v1/chat/completions',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('OpenRouter Vision yanıtını 20 saniyede kesmez', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation((_input: unknown, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({
+        choices: [{ message: { content: '{"gazeteBasliklari":[]}' } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })), 30_000);
+      const abort = () => {
+        clearTimeout(timer);
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      if (init?.signal?.aborted) abort();
+      else init?.signal?.addEventListener('abort', abort, { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = generateWithFallback({
+      ENVIRONMENT: 'production',
+      OPENROUTER_API_KEY: 'openrouter-test',
+      AI_VISION_PROVIDER_ORDER: 'openrouter',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+    });
+
+    await vi.advanceTimersByTimeAsync(30_001);
+    const result = await pending;
+    expect(result.provider).toBe('openrouter');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('sağlayıcı başlıkları dönüp JSON gövdesini bitirmezse 20 saniyede keser', async () => {
