@@ -1,14 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { musicRoutes, NEWS_MUSIC } from './music';
+import { DRIVE_FOLDER_ID, musicRoutes, NEWS_MUSIC } from './music';
 
 afterEach(() => vi.restoreAllMocks());
 
 describe('Google Drive automatic news music', () => {
-  it('returns only the verified news-music catalog', async () => {
+  it('returns the verified Drive-folder music catalog', async () => {
     const response = await musicRoutes.request('/catalog');
-    const payload = await response.json() as { data: { tracks: Array<{ id: string; mimeType: string }> } };
+    const payload = await response.json() as {
+      data: {
+        folderId: string;
+        trackCount: number;
+        tracks: Array<{ id: string; mimeType: string }>;
+      };
+    };
+
     expect(response.status).toBe(200);
-    expect(payload.data.tracks).toHaveLength(12);
+    expect(payload.data.folderId).toBe(DRIVE_FOLDER_ID);
+    expect(payload.data.trackCount).toBe(NEWS_MUSIC.length);
+    expect(payload.data.tracks).toHaveLength(NEWS_MUSIC.length);
+    expect(payload.data.tracks.length).toBeGreaterThan(50);
     expect(payload.data.tracks.every(track => track.mimeType === 'audio/mpeg')).toBe(true);
   });
 
