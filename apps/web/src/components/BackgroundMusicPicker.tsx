@@ -39,6 +39,17 @@ function createTrack(file: File, index: number): LocalMusicTrack {
   };
 }
 
+const SELECT_STYLE: React.CSSProperties = {
+  colorScheme: 'dark',
+  backgroundColor: '#0f172a',
+  color: '#ffffff',
+};
+
+const OPTION_STYLE: React.CSSProperties = {
+  backgroundColor: '#0f172a',
+  color: '#ffffff',
+};
+
 export function BackgroundMusicPicker({ value, volume, onChange, onVolumeChange }: BackgroundMusicPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -236,39 +247,64 @@ export function BackgroundMusicPicker({ value, volume, onChange, onVolumeChange 
           </div>
 
           <div className="min-w-0 flex-1">
-            <h2 id="background-music-title" className="mb-0.5 text-[10px] font-black tracking-wide text-slate-400">
+            <h2 id="background-music-title" className="mb-1 text-[10px] font-black tracking-wide text-slate-400">
               ARKA PLAN SESİ
             </h2>
-            <div className="relative flex items-center gap-2">
-              {value ? <Music size={14} className="shrink-0 text-indigo-400" /> : <span aria-hidden="true">🔇</span>}
-              <span className="truncate text-xs font-bold text-white">
-                {isDriveLoading ? 'Müzik yükleniyor...' : value?.name || 'Arka Ses Yok'}
-              </span>
-              <ChevronDown size={14} className="ml-auto shrink-0 text-slate-400" />
+
+            <div className="relative">
+              <Music
+                size={14}
+                className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-indigo-400"
+              />
+
               <select
                 aria-label="Arka plan müziği"
                 value={value?.id || ''}
                 onChange={handleTrackChange}
                 disabled={isDriveLoading}
-                className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 disabled:cursor-wait"
+                style={SELECT_STYLE}
+                className="h-11 w-full cursor-pointer appearance-none rounded-lg border border-slate-700 bg-slate-900 py-2 pl-9 pr-10 text-sm font-semibold text-white shadow-inner outline-none transition hover:border-slate-500 focus:border-violet-400 focus:ring-2 focus:ring-violet-500/30 disabled:cursor-wait disabled:opacity-70"
               >
-                <option value="">Arka Ses Yok</option>
+                <option value="" style={OPTION_STYLE}>Arka Ses Yok</option>
+
                 {driveTracks.length > 0 && (
-                  <optgroup label={`Google Drive (${driveTracks.length})`}>
+                  <optgroup label={`Google Drive (${driveTracks.length})`} style={OPTION_STYLE}>
                     {driveTracks.map(track => (
-                      <option key={track.id} value={`drive-${track.id}`}>{track.name}</option>
+                      <option
+                        key={track.id}
+                        value={`drive-${track.id}`}
+                        style={OPTION_STYLE}
+                      >
+                        {track.name}
+                      </option>
                     ))}
                   </optgroup>
                 )}
+
                 {tracks.length > 0 && (
-                  <optgroup label={`Yerel Müzikler (${tracks.length})`}>
+                  <optgroup label={`Yerel Müzikler (${tracks.length})`} style={OPTION_STYLE}>
                     {tracks.map(track => (
-                      <option key={track.id} value={track.id}>{track.label}</option>
+                      <option
+                        key={track.id}
+                        value={track.id}
+                        style={OPTION_STYLE}
+                      >
+                        {track.label}
+                      </option>
                     ))}
                   </optgroup>
                 )}
               </select>
+
+              <ChevronDown
+                size={14}
+                className="pointer-events-none absolute right-3 top-1/2 z-10 -translate-y-1/2 text-slate-300"
+              />
             </div>
+
+            {isDriveLoading && (
+              <p className="mt-1 text-[9px] font-semibold text-violet-300">Müzik yükleniyor...</p>
+            )}
           </div>
         </div>
 
