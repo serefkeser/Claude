@@ -53,13 +53,40 @@ function normalize(value: string) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function basicVisionHeadlineCheck(value: string) {
+  const text = normalize(value);
+  const words = text.split(/\s+/).filter(Boolean);
+  const letters = text.match(/\p{L}/gu) || [];
+  if (words.length < 2 || words.length > 20 || letters.length < 5) return false;
+  if (/[₺$€£]/u.test(text) && !/\d/u.test(text)) return false;
+  return letters.length / Math.max(1, text.length) >= 0.5;
+}
+
+function basicVisionDetailCheck(value: string) {
+  const text = normalize(value);
+  const words = text.split(/\s+/).filter(Boolean);
+  const letters = text.match(/\p{L}/gu) || [];
+  if (words.length < 4 || words.length > 70 || letters.length < 12) return false;
+  if (/[:;\-–—]$/.test(text)) return false;
+  if (letters.length / Math.max(1, text.length) < 0.58) return false;
+  return /[.!?…]["'”’)]?$/.test(text)
+    || /(?:dı|di|du|dü|tı|ti|tu|tü|yor|acak|ecek|mış|miş|muş|müş|oldu|öldü|kaldı|başladı|bitti|açıkladı|söyledi|belirtti|dedi|yayımladı|yayınladı)$/iu.test(words.at(-1) || '');
+}
+
 function selectPublishableCandidates(candidates: VerifiedNewspaperCandidate[]) {
   return candidates
     .filter((candidate, index, all) => {
       const id = normalize(candidate.id).toUpperCase();
+      const isVisionDirect = candidate.confidence >= 99;
+      const headlineOk = isVisionDirect
+        ? basicVisionHeadlineCheck(candidate.text)
+        : isLikelyCompleteNewspaperHeadline(candidate.text);
+      const detailOk = isVisionDirect
+        ? basicVisionDetailCheck(candidate.detail)
+        : isReliableNewspaperDetail(candidate.detail);
       return /^H\d+$/.test(id)
-        && isLikelyCompleteNewspaperHeadline(candidate.text)
-        && isReliableNewspaperDetail(candidate.detail)
+        && headlineOk
+        && detailOk
         && all.findIndex(item => normalize(item.id).toUpperCase() === id) === index;
     })
     .slice(0, MAX_NEWSPAPER_STORIES);
@@ -123,8 +150,6 @@ export function buildLockedNewspaperScript<T extends NewspaperScriptContract>(op
   const firstAiSlide = options.script.videoSlides.find(
     slide => normalize(slide.sourceHeadlineId || '').toUpperCase() === firstCandidate?.id,
   );
-  // Clickbait, gazetenin kendi basılı başlık/spot dilindeki kelimelerden türetilir.
-  // Böylece editoryal çerçeve korunur; kaynakta olmayan ideolojik etiket veya iddia eklenmez.
   const editorialEvidence = buildEditorialEvidence(selected);
   const requestedHook = options.script.thumbnailText || firstAiSlide?.topText || '';
   const coverHook = groundedNewspaperHook(
@@ -132,27 +157,23 @@ export function buildLockedNewspaperScript<T extends NewspaperScriptContract>(op
     editorialEvidence || firstCandidate?.text || 'GÜNDEM',
   );
   const fallbackHook = groundedNewspaperHook('', firstCandidate?.text || 'GÜNDEM');
-  const videoSlides = selected.map(candidate => {
-    return {
-      sourceHeadlineId: candidate.id,
-      sourceHeadline: candidate.text,
-      topText: candidate.text,
-      spokenText: buildNewspaperNarration({
-        sourceName,
-        headline: candidate.text,
-        detail: candidate.detail,
-      }),
-      imagePrompts: [],
-    };
-  });
+  const videoSlides = selected.map(candidate => ({
+    sourceHeadlineId: candidate.id,
+    sourceHeadline: candidate.text,
+    topText: candidate.text,
+    spokenText: buildNewspaperNarration({
+      sourceName,
+      headline: candidate.text,
+      detail: candidate.detail,
+    }),
+    imagePrompts: [],
+  }));
 
   const locked = {
     ...options.script,
     isContentUnreadable: false,
     videoSlides,
     thumbnailText: buildVerifiedCoverHook(coverHook || fallbackHook),
-    // Gazete modunda Son Söz storyboard aşamasında doğrulanmış alıntı havuzundan
-    // tekrarsız seçilir. Sabit cümle burada bilerek tutulmaz.
     sonSoz: '',
     gununSorusu: '',
     lastQuote: '',
