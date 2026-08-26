@@ -49,5 +49,25 @@ jobs:
           workingDirectory: services/api-gateway
           command: deploy
 
-      - name: Verify production health
-        run: curl --fail --retry 8 --retry-delay 5 --retry-all-errors https://api.seref-keser.workers.dev/health
+      - name: Verify production health and exact version
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          HEALTH_URL='https://api.seref-keser.workers.dev/health'
+
+          for attempt in $(seq 1 18); do
+            BODY=$(curl --silent --show-error --fail --max-time 15 "$HEALTH_URL" || true)
+            ACTUAL_VERSION=$(printf '%s' "$BODY" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s)?.data?.version||'')}catch{console.log('')}})" )
+
+            echo "Worker health attempt ${attempt}/18 · expected=${EXPECTED_VERSION} · actual=${ACTUAL_VERSION:-missing}"
+            if [ "$ACTUAL_VERSION" = "$EXPECTED_VERSION" ]; then
+              printf '%s\n' "$BODY"
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Worker production health never reached expected version ${EXPECTED_VERSION}." >&2
+          exit 1
