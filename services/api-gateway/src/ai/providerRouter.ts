@@ -88,7 +88,7 @@ interface ProviderDefinition {
 }
 
 const DEFAULT_TEXT_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'groq', 'opencode', 'nvidia'];
-const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'nvidia', 'groq'];
+const DEFAULT_VISION_ORDER: AiProviderName[] = ['nvidia', 'gemini', 'openrouter', 'groq'];
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_VISION_TIMEOUT_MS = 40_000;
 const TTS_TIMEOUT_MS = 60_000;
@@ -182,7 +182,7 @@ function getProviderDefinitions(env: AiProviderEnv, task: AiTask) {
       endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
       apiKey: env.NVIDIA_API_KEY,
       model: task === 'vision'
-        ? (env.NVIDIA_VISION_MODEL || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning')
+        ? (env.NVIDIA_VISION_MODEL || 'nvidia/nemotron-nano-12b-v2-vl')
         : (env.NVIDIA_TEXT_MODEL || 'nvidia/nemotron-3-nano-30b-a3b'),
       supportsVision: true,
       jsonMode: false,
@@ -292,7 +292,7 @@ async function callOpenAiCompatible(
   if (request.responseFormat === 'json' && provider.jsonMode) {
     body.response_format = { type: 'json_object' };
   }
-  if (provider.name === 'nvidia') {
+  if (provider.name === 'nvidia' && request.task !== 'vision') {
     body.reasoning_budget = Math.min(2048, Math.max(256, Math.floor((request.maxTokens ?? 4096) / 3)));
   }
 
