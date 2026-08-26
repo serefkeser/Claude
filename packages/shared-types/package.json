@@ -1,6 +1,6 @@
 {
   "name": "@otonom/shared-types",
-  "version": "3.14.39",
+  "version": "3.14.40",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {

@@ -795,7 +795,6 @@ export async function analyzeForVideo(options: {
 
   const localCandidates = options.inputType === 'gazete' ? parseLocalOcrCandidates(localOcrText) : [];
   const visionCandidates = options.inputType === 'gazete'
-    && localCandidates.length < 5
     && imageCandidates[0]
     && result.script.visionGazeteBasliklari?.length
     ? await addLocalCropEvidenceToVisionCandidates(
