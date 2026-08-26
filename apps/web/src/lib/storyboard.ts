@@ -37,6 +37,36 @@ const DEFAULT_QUESTIONS: Record<string, string> = {
   ru: 'Что вы думаете об этом событии?',
 };
 
+interface FinalWordEntry {
+  id: string;
+  text: string;
+  author: string;
+}
+
+// Gazete videolarında aynı sabit cümleyi tekrar etmek yerine güvenli ve kısa
+// bir havuz döndürülür. Kaynağı tartışmalı internet alıntıları özellikle yoktur.
+export const TURKISH_FINAL_WORDS: FinalWordEntry[] = [
+  { id: 'ataturk-ilim', text: 'Hayatta en hakiki mürşit ilimdir, fendir.', author: 'Mustafa Kemal Atatürk' },
+  { id: 'ataturk-egemenlik', text: 'Egemenlik kayıtsız şartsız milletindir.', author: 'Mustafa Kemal Atatürk' },
+  { id: 'ataturk-sulh', text: 'Yurtta sulh, cihanda sulh.', author: 'Mustafa Kemal Atatürk' },
+  { id: 'sokrates-hayat', text: 'Sorgulanmamış hayat yaşamaya değmez.', author: 'Sokrates' },
+  { id: 'descartes-dusunuyorum', text: 'Düşünüyorum, öyleyse varım.', author: 'René Descartes' },
+  { id: 'bacon-bilgi', text: 'Bilgi güçtür.', author: 'Francis Bacon' },
+  { id: 'yunus-ilim', text: 'İlim ilim bilmektir, ilim kendin bilmektir.', author: 'Yunus Emre' },
+  { id: 'epiktetos-yargi', text: 'Bizi üzen şeyler değil, onlar hakkındaki yargılarımızdır.', author: 'Epiktetos' },
+  { id: 'atasozu-akil', text: 'Akıl akıldan üstündür.', author: 'Türk atasözü' },
+  { id: 'atasozu-birlik', text: 'Birlikten kuvvet doğar.', author: 'Türk atasözü' },
+  { id: 'atasozu-demir', text: 'İşleyen demir ışıldar.', author: 'Türk atasözü' },
+  { id: 'atasozu-damlaya', text: 'Damlaya damlaya göl olur.', author: 'Türk atasözü' },
+  { id: 'atasozu-neekersen', text: 'Ne ekersen onu biçersin.', author: 'Türk atasözü' },
+  { id: 'atasozu-dost', text: 'Dost acı söyler.', author: 'Türk atasözü' },
+  { id: 'atasozu-acele', text: 'Acele işe şeytan karışır.', author: 'Türk atasözü' },
+  { id: 'atasozu-sakla', text: 'Sakla samanı, gelir zamanı.', author: 'Türk atasözü' },
+];
+
+const FINAL_WORD_HISTORY_KEY = 'otonom_final_word_history_v1';
+const FINAL_WORD_HISTORY_LIMIT = 10;
+
 export const OUTRO_TEXTS: Record<string, string[]> = {
   tr: ['Abone olmayı,', 'beğenmeyi ve', 'paylaşmayı', 'ihmal etmeyin.'],
   en: ["Don't forget to", 'subscribe, like', 'and share.'],
@@ -84,6 +114,50 @@ function isNearDuplicate(left: string, right: string) {
   return shared / Math.min(a.size, b.size) >= 0.75;
 }
 
+function stableHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function readFinalWordHistory() {
+  if (typeof window === 'undefined') return [] as string[];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FINAL_WORD_HISTORY_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : [];
+  } catch {
+    return [] as string[];
+  }
+}
+
+function writeFinalWordHistory(history: string[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(FINAL_WORD_HISTORY_KEY, JSON.stringify(history.slice(-FINAL_WORD_HISTORY_LIMIT)));
+  } catch {
+    // localStorage kapalıysa üretim engellenmez; zaman tabanlı deterministik seçim kullanılır.
+  }
+}
+
+export function selectRotatingFinalWord(seed: string) {
+  const history = readFinalWordHistory();
+  const recent = new Set(history);
+  const start = stableHash(seed) % TURKISH_FINAL_WORDS.length;
+  let selected = TURKISH_FINAL_WORDS[start];
+  for (let offset = 0; offset < TURKISH_FINAL_WORDS.length; offset += 1) {
+    const candidate = TURKISH_FINAL_WORDS[(start + offset) % TURKISH_FINAL_WORDS.length];
+    if (!recent.has(candidate.id)) {
+      selected = candidate;
+      break;
+    }
+  }
+  writeFinalWordHistory([...history.filter(id => id !== selected.id), selected.id]);
+  return `${selected.text} — ${selected.author}`;
+}
+
 function buildCoverNarration(script: HermesScript, config: RenderConfig, now: Date) {
   if (script.gazeteBasliklari?.length) {
     return ensureSentence(clean(script.thumbnailText));
@@ -118,11 +192,19 @@ export function buildRenderStoryboard(script: HermesScript, config: RenderConfig
 
   const lastContent = contentScenes.at(-1)?.spokenText || '';
   const requestedFinal = clean(script.sonSoz);
-  const finalText = requestedFinal && !isNearDuplicate(requestedFinal, lastContent)
-    ? requestedFinal
-    : language === 'tr'
-      ? 'Gerçeklerin er ya da geç ortaya çıkmak gibi bir huyu vardır.'
-      : 'The truth has a way of coming to light.';
+  const isNewspaper = Boolean(script.gazeteBasliklari?.length);
+  const newspaperSeed = [
+    now.toISOString().slice(0, 16),
+    clean(config.sourceName || script.sourceName),
+    clean(script.gazeteBasliklari?.[0]?.baslik),
+  ].join('|');
+  const finalText = isNewspaper && language === 'tr'
+    ? selectRotatingFinalWord(newspaperSeed)
+    : requestedFinal && !isNearDuplicate(requestedFinal, lastContent)
+      ? requestedFinal
+      : language === 'tr'
+        ? selectRotatingFinalWord(`${newspaperSeed}|fallback`)
+        : 'The truth has a way of coming to light.';
   const userComment = clean(config.yorum);
   scenes.push({
     kind: 'final',
