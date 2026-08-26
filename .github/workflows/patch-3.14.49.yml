@@ -33,29 +33,34 @@ jobs:
               text = file.read_text(encoding='utf-8')
               actual = text.count(old)
               if actual != count:
-                  raise SystemExit(f'{path}: expected {count} occurrence(s), found {actual}: {old[:120]!r}')
+                  raise SystemExit(f'{path}: expected {count} occurrence(s), found {actual}: {old[:140]!r}')
               file.write_text(text.replace(old, new), encoding='utf-8')
 
           replace(
               'services/api-gateway/src/ai/providerRouter.ts',
               "const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'nvidia', 'openrouter'];",
-              "const DEFAULT_VISION_ORDER: AiProviderName[] = ['groq', 'gemini', 'openrouter'];",
+              "const DEFAULT_VISION_ORDER: AiProviderName[] = ['groq', 'nvidia', 'gemini', 'openrouter'];",
           )
           replace(
               'services/api-gateway/src/ai/providerRouter.ts',
-              "const NVIDIA_VISION_TIMEOUT_MS = 55_000;\n",
-              "const GROQ_VISION_TIMEOUT_MS = 55_000;\n",
+              "const OPENROUTER_VISION_TIMEOUT_MS = 55_000;\nconst NVIDIA_VISION_TIMEOUT_MS = 55_000;",
+              "const OPENROUTER_VISION_TIMEOUT_MS = 55_000;\nconst GROQ_VISION_TIMEOUT_MS = 55_000;\nconst NVIDIA_VISION_TIMEOUT_MS = 55_000;",
           )
           replace(
               'services/api-gateway/src/ai/providerRouter.ts',
-              "  if (request.task === 'vision' && provider.name === 'nvidia') return NVIDIA_VISION_TIMEOUT_MS;",
-              "  if (request.task === 'vision' && provider.name === 'groq') return GROQ_VISION_TIMEOUT_MS;",
+              "function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRequest) {\n  if (request.task === 'vision' && provider.name === 'nvidia') return NVIDIA_VISION_TIMEOUT_MS;\n  if (request.task === 'vision' && provider.name === 'openrouter') return OPENROUTER_VISION_TIMEOUT_MS;\n  return PROVIDER_TIMEOUT_MS;\n}",
+              "function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRequest) {\n  if (request.task === 'vision' && provider.name === 'groq') return GROQ_VISION_TIMEOUT_MS;\n  if (request.task === 'vision' && provider.name === 'nvidia') return NVIDIA_VISION_TIMEOUT_MS;\n  if (request.task === 'vision' && provider.name === 'openrouter') return OPENROUTER_VISION_TIMEOUT_MS;\n  return PROVIDER_TIMEOUT_MS;\n}",
+          )
+          replace(
+              'services/api-gateway/src/ai/providerRouter.ts',
+              "? (env.NVIDIA_VISION_MODEL || 'nvidia/nemotron-nano-12b-v2-vl')",
+              "? (env.NVIDIA_VISION_MODEL || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning')",
           )
 
           replace(
               'services/api-gateway/src/routes/ai.ts',
               "visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'gemini,nvidia,openrouter',",
-              "visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'groq,gemini,openrouter',",
+              "visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'groq,nvidia,gemini,openrouter',",
           )
 
           wrangler = Path('services/api-gateway/wrangler.toml')
@@ -63,10 +68,14 @@ jobs:
           old_order = 'AI_VISION_PROVIDER_ORDER = "gemini,nvidia,openrouter"'
           if text.count(old_order) != 3:
               raise SystemExit(f'wrangler.toml: expected 3 Vision order entries, found {text.count(old_order)}')
-          text = text.replace(old_order, 'AI_VISION_PROVIDER_ORDER = "groq,gemini,openrouter"')
+          text = text.replace(old_order, 'AI_VISION_PROVIDER_ORDER = "groq,nvidia,gemini,openrouter"')
+          old_nvidia_model = 'NVIDIA_VISION_MODEL = "nvidia/nemotron-nano-12b-v2-vl"'
+          if text.count(old_nvidia_model) != 3:
+              raise SystemExit(f'wrangler.toml: expected 3 NVIDIA model entries, found {text.count(old_nvidia_model)}')
+          text = text.replace(old_nvidia_model, 'NVIDIA_VISION_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"')
           text = text.replace(
               '# OTONOM 3.14.48 production deploy · single-image newspaper Vision · release',
-              '# OTONOM 3.14.49 production deploy · current Groq Vision fallback · release',
+              '# OTONOM 3.14.49 production deploy · current Groq + NVIDIA Vision · release',
           )
           wrangler.write_text(text, encoding='utf-8')
 
@@ -79,6 +88,168 @@ jobs:
               'apps/web/src/lib/newspaperVisionViews.test.ts',
               '    expect(layout.width).toBe(2600);\n    expect(layout.height).toBe(2200);',
               '    expect(layout.width).toBe(2200);\n    expect(layout.height).toBe(1900);',
+          )
+
+          old_default_test = '''  it('varsayılan production Vision zincirinde NVIDIA ve Groqyu çağırmaz', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"isContentUnreadable":false,"gazeteBasliklari":[]}' }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      OPENROUTER_API_KEY: 'openrouter-test',
+      NVIDIA_API_KEY: 'nvidia-test',
+      GROQ_API_KEY: 'groq-test',
+      ALLOW_NVIDIA_TRIAL: 'true',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+    });
+
+    expect(result.provider).toBe('gemini');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('generativelanguage.googleapis.com');
+  });'''
+          new_default_test = '''  it('varsayılan production Vision zincirinde güncel Groq Vision sağlayıcısını önce çağırır', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"isContentUnreadable":false,"gazeteBasliklari":[]}' } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      OPENROUTER_API_KEY: 'openrouter-test',
+      NVIDIA_API_KEY: 'nvidia-test',
+      GROQ_API_KEY: 'groq-test',
+      ALLOW_NVIDIA_TRIAL: 'true',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+    });
+
+    expect(result.provider).toBe('groq');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('api.groq.com');
+  });'''
+          replace('services/api-gateway/src/ai/providerRouter.test.ts', old_default_test, new_default_test)
+
+          old_fallback_test = '''  it('Gemini iki kez doğrulamayı geçmezse doğrudan NVIDIA Vision sağlayıcısına geçer', async () => {
+    const valid = '{"isContentUnreadable":false,"gazeteBasliklari":[{"baslik":"Birinci gerçek haber","aciklama":"Gazetede basılı gerçek açıklama cümlesi.","onem":100,"x":1,"y":1,"w":40,"h":10}]}';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'geçersiz ilk yanıt' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'geçersiz ikinci yanıt' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: valid } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      NVIDIA_API_KEY: 'nvidia-test',
+      OPENROUTER_API_KEY: 'openrouter-test',
+      ALLOW_NVIDIA_TRIAL: 'true',
+    }, {
+      task: 'vision',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Gazeteyi oku.' },
+          { type: 'image', mimeType: 'image/jpeg', data: 'AA==' },
+        ],
+      }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+      validateResponse: text => {
+        if (!text.trim().startsWith('{')) throw new Error('gazete JSON doğrulanamadı');
+      },
+    });
+
+    expect(result.provider).toBe('nvidia');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[2][0])).toContain('integrate.api.nvidia.com');
+
+    const nvidiaBody = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body)) as {
+      messages: Array<{ content: Array<{ type: string }> }>;
+    };
+    const imageParts = nvidiaBody.messages
+      .flatMap(message => Array.isArray(message.content) ? message.content : [])
+      .filter(part => part.type === 'image_url');
+    expect(imageParts).toHaveLength(1);
+  });'''
+          new_fallback_test = '''  it('Gemini iki kez doğrulamayı geçmezse doğrudan Groq Vision sağlayıcısına geçer', async () => {
+    const valid = '{"isContentUnreadable":false,"gazeteBasliklari":[{"baslik":"Birinci gerçek haber","aciklama":"Gazetede basılı gerçek açıklama cümlesi.","onem":100,"x":1,"y":1,"w":40,"h":10}]}';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'geçersiz ilk yanıt' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'geçersiz ikinci yanıt' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: valid } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      GROQ_API_KEY: 'groq-test',
+      NVIDIA_API_KEY: 'nvidia-test',
+      OPENROUTER_API_KEY: 'openrouter-test',
+      ALLOW_NVIDIA_TRIAL: 'true',
+      AI_VISION_PROVIDER_ORDER: 'gemini,groq,nvidia,openrouter',
+    }, {
+      task: 'vision',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Gazeteyi oku.' },
+          { type: 'image', mimeType: 'image/jpeg', data: 'AA==' },
+        ],
+      }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+      validateResponse: text => {
+        if (!text.trim().startsWith('{')) throw new Error('gazete JSON doğrulanamadı');
+      },
+    });
+
+    expect(result.provider).toBe('groq');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[2][0])).toContain('api.groq.com');
+
+    const groqBody = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body)) as {
+      messages: Array<{ content: Array<{ type: string }> }>;
+    };
+    const imageParts = groqBody.messages
+      .flatMap(message => Array.isArray(message.content) ? message.content : [])
+      .filter(part => part.type === 'image_url');
+    expect(imageParts).toHaveLength(1);
+  });'''
+          replace('services/api-gateway/src/ai/newspaperSingleImageFallback.test.ts', old_fallback_test, new_fallback_test)
+
+          replace(
+              'services/api-gateway/src/ai/nvidiaVisionConfig.test.ts',
+              'uses Nemotron Nano 12B VL and does not send text-only reasoning_budget',
+              'uses current Nemotron 3 Nano Omni vision model and does not send text-only reasoning_budget',
+          )
+          replace(
+              'services/api-gateway/src/ai/nvidiaVisionConfig.test.ts',
+              'nvidia/nemotron-nano-12b-v2-vl',
+              'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+              count=2,
           )
           PY
 
