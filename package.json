@@ -21,10 +21,13 @@
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "typecheck": "tsc --noEmit --project tsconfig.base.json",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
     "deploy:web": "npm run deploy --workspace=apps/web",
     "deploy:workers": "npm run deploy --workspaces --if-present --workspace=services/*"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/node": "^20.11.0",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
