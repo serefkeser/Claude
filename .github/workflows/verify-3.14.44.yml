@@ -1,0 +1,69 @@
+name: Verify OTONOM 3.14.44
+
+on:
+  push:
+    branches: ['fix/vision-3.14.44']
+    paths:
+      - '.github/release-trigger-3.14.44'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Set OTONOM 3.14.44 version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" = "3.14.43" ]; then
+            npm run version:bump
+          elif [ "$CURRENT" != "3.14.44" ]; then
+            echo "Unexpected version: $CURRENT"
+            exit 1
+          fi
+
+      - name: Check version consistency
+        run: npm run version:check
+
+      - name: Run full Vitest suite
+        run: npm test
+
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=apps/web
+
+      - name: Build web app
+        run: npm run build:web
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+
+      - name: Typecheck AI gateway
+        run: npm run typecheck --workspace=services/api-gateway
+
+      - name: Test AI gateway
+        run: npm run test --workspace=services/api-gateway
+
+      - name: Commit generated version files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No generated version changes to commit.'
+          else
+            git commit -m 'chore: finalize OTONOM 3.14.44 version files'
+            git push origin HEAD:fix/vision-3.14.44
+          fi
