@@ -1,6 +1,6 @@
 {
   "name": "otonom-monorepo",
-  "version": "3.14.41",
+  "version": "3.14.42",
   "private": true,
   "workspaces": [
     "apps/*",
