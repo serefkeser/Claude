@@ -94,6 +94,43 @@ describe('AI provider fallback', () => {
     ]);
   });
 
+  it('Gemini vision yanıtını 20 saniyelik metin timeoutuyla kesmez', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation((_input: unknown, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"videoSlides":[]}' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })), 25_000);
+      const abort = () => {
+        clearTimeout(timer);
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      if (init?.signal?.aborted) abort();
+      else init?.signal?.addEventListener('abort', abort, { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_VISION_PROVIDER_ORDER: 'gemini',
+    }, {
+      task: 'vision',
+      messages: [{
+        role: 'user',
+        content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }],
+      }],
+      responseFormat: 'json',
+    });
+
+    await vi.advanceTimersByTimeAsync(25_001);
+    const result = await pending;
+
+    expect(result.provider).toBe('gemini');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('görsel görevinde metin-only OpenCode sağlayıcısını çağırmaz', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"videoSlides":[]}' } }],
