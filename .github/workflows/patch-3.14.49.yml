@@ -1,0 +1,133 @@
+name: Patch and Verify OTONOM 3.14.49
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/release-trigger-3.14.49'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply current Vision provider patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: expected {count} occurrence(s), found {actual}: {old[:120]!r}')
+              file.write_text(text.replace(old, new), encoding='utf-8')
+
+          replace(
+              'services/api-gateway/src/ai/providerRouter.ts',
+              "const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'nvidia', 'openrouter'];",
+              "const DEFAULT_VISION_ORDER: AiProviderName[] = ['groq', 'gemini', 'openrouter'];",
+          )
+          replace(
+              'services/api-gateway/src/ai/providerRouter.ts',
+              "const NVIDIA_VISION_TIMEOUT_MS = 55_000;\n",
+              "const GROQ_VISION_TIMEOUT_MS = 55_000;\n",
+          )
+          replace(
+              'services/api-gateway/src/ai/providerRouter.ts',
+              "  if (request.task === 'vision' && provider.name === 'nvidia') return NVIDIA_VISION_TIMEOUT_MS;",
+              "  if (request.task === 'vision' && provider.name === 'groq') return GROQ_VISION_TIMEOUT_MS;",
+          )
+
+          replace(
+              'services/api-gateway/src/routes/ai.ts',
+              "visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'gemini,nvidia,openrouter',",
+              "visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'groq,gemini,openrouter',",
+          )
+
+          wrangler = Path('services/api-gateway/wrangler.toml')
+          text = wrangler.read_text(encoding='utf-8')
+          old_order = 'AI_VISION_PROVIDER_ORDER = "gemini,nvidia,openrouter"'
+          if text.count(old_order) != 3:
+              raise SystemExit(f'wrangler.toml: expected 3 Vision order entries, found {text.count(old_order)}')
+          text = text.replace(old_order, 'AI_VISION_PROVIDER_ORDER = "groq,gemini,openrouter"')
+          text = text.replace(
+              '# OTONOM 3.14.48 production deploy · single-image newspaper Vision · release',
+              '# OTONOM 3.14.49 production deploy · current Groq Vision fallback · release',
+          )
+          wrangler.write_text(text, encoding='utf-8')
+
+          replace(
+              'apps/web/src/lib/newspaperVisionViews.ts',
+              'const COMPOSITE_WIDTH = 2600;\nconst COMPOSITE_HEIGHT = 2200;\nconst COMPOSITE_PADDING = 24;\nconst COMPOSITE_GAP = 24;\nconst COMPOSITE_JPEG_QUALITY = 0.9;',
+              'const COMPOSITE_WIDTH = 2200;\nconst COMPOSITE_HEIGHT = 1900;\nconst COMPOSITE_PADDING = 20;\nconst COMPOSITE_GAP = 20;\nconst COMPOSITE_JPEG_QUALITY = 0.84;',
+          )
+
+          replace(
+              'apps/web/src/lib/newspaperVisionViews.test.ts',
+              "    expect(image).toEqual(expect.objectContaining({ mimeType: 'image/jpeg' }));\n    expect(image.data.length).toBeGreaterThan(100);",
+              "    expect(image).toEqual(expect.objectContaining({ mimeType: 'image/jpeg' }));\n    expect(image.data.length).toBeGreaterThan(100);\n    expect(image.data.length).toBeLessThan(20_000_000);",
+          )
+          PY
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Set OTONOM 3.14.49 version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" = "3.14.48" ]; then
+            npm run version:bump
+          elif [ "$CURRENT" != "3.14.49" ]; then
+            echo "Unexpected version: $CURRENT"
+            exit 1
+          fi
+
+      - name: Check version consistency
+        run: npm run version:check
+
+      - name: Run full Vitest suite
+        run: npm test
+
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=apps/web
+
+      - name: Build web app
+        run: npm run build:web
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+
+      - name: Typecheck AI gateway
+        run: npm run typecheck --workspace=services/api-gateway
+
+      - name: Test AI gateway
+        run: npm run test --workspace=services/api-gateway
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright browser e2e
+        run: npm run test:e2e
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+
+      - name: Commit verified patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: replace retired newspaper Vision provider'
+          git push origin HEAD:main
