@@ -139,8 +139,6 @@ const NEWSPAPER_RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
     isContentUnreadable: { type: 'BOOLEAN' },
-    sourceName: { type: 'STRING' },
-    thumbnailText: { type: 'STRING' },
     gazeteBasliklari: {
       type: 'ARRAY',
       items: {
@@ -158,8 +156,30 @@ const NEWSPAPER_RESPONSE_SCHEMA = {
       },
     },
   },
-  required: ['isContentUnreadable', 'sourceName', 'thumbnailText', 'gazeteBasliklari'],
+  required: ['isContentUnreadable', 'gazeteBasliklari'],
 };
+
+function selectedResponseSchema(request: AiGenerationRequest) {
+  return request.responseSchema === 'newspaper'
+    ? NEWSPAPER_RESPONSE_SCHEMA
+    : HERMES_RESPONSE_SCHEMA;
+}
+
+function toOpenRouterJsonSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(item => toOpenRouterJsonSchema(item));
+  if (!value || typeof value !== 'object') return value;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = key === 'type' && typeof item === 'string'
+      ? item.toLowerCase()
+      : toOpenRouterJsonSchema(item);
+  }
+  if (result.type === 'object' && result.additionalProperties === undefined) {
+    result.additionalProperties = false;
+  }
+  return result;
+}
 
 async function withRequestTimeout<T>(
   operation: (signal: AbortSignal) => Promise<T>,
@@ -288,8 +308,8 @@ function toOpenAiContent(content: AiMessage['content'], supportsVision: boolean)
 }
 
 function errorReason(value: unknown) {
-  if (value instanceof Error) return value.message.slice(0, 240);
-  return String(value || 'Bilinmeyen sağlayıcı hatası').slice(0, 240);
+  if (value instanceof Error) return value.message.slice(0, 500);
+  return String(value || 'Bilinmeyen sağlayıcı hatası').slice(0, 500);
 }
 
 function errorStatus(value: unknown) {
@@ -310,6 +330,7 @@ function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRe
 async function callOpenAiCompatible(
   provider: ProviderDefinition,
   request: AiGenerationRequest,
+  options: { openRouterPlainJson?: boolean } = {},
 ): Promise<string> {
   const body: Record<string, unknown> = {
     model: provider.model,
@@ -323,7 +344,25 @@ async function callOpenAiCompatible(
   };
 
   if (request.responseFormat === 'json' && provider.jsonMode) {
-    body.response_format = { type: 'json_object' };
+    if (provider.name === 'openrouter') {
+      if (!options.openRouterPlainJson) {
+        const schemaName = request.responseSchema === 'newspaper'
+          ? 'otonom_newspaper'
+          : 'otonom_script';
+        body.response_format = {
+          type: 'json_schema',
+          json_schema: {
+            name: schemaName,
+            strict: true,
+            schema: toOpenRouterJsonSchema(selectedResponseSchema(request)),
+          },
+        };
+        body.provider = { require_parameters: true };
+        body.plugins = [{ id: 'response-healing' }];
+      }
+    } else {
+      body.response_format = { type: 'json_object' };
+    }
   }
   if (provider.name === 'nvidia' && request.task !== 'vision') {
     body.reasoning_budget = Math.min(2048, Math.max(256, Math.floor((request.maxTokens ?? 4096) / 3)));
@@ -383,9 +422,7 @@ async function callGemini(
       role: message.role === 'assistant' ? 'model' : 'user',
       parts: toGeminiParts(message.content),
     }));
-  const schema = request.responseSchema === 'newspaper'
-    ? NEWSPAPER_RESPONSE_SCHEMA
-    : HERMES_RESPONSE_SCHEMA;
+  const schema = selectedResponseSchema(request);
 
   return withRequestTimeout(async signal => {
     const response = await fetch(
@@ -438,12 +475,18 @@ export async function generateWithFallback(
 
   const attempts: AiProviderAttempt[] = [];
   for (const provider of providers) {
-    const providerCalls = provider.name === 'gemini' ? 2 : 1;
+    const providerCalls = provider.name === 'gemini'
+      || (provider.name === 'openrouter' && request.responseFormat === 'json')
+      ? 2
+      : 1;
+
     for (let callIndex = 0; callIndex < providerCalls; callIndex += 1) {
       try {
         const text = provider.name === 'gemini'
           ? await callGemini(provider, request)
-          : await callOpenAiCompatible(provider, request);
+          : await callOpenAiCompatible(provider, request, {
+            openRouterPlainJson: provider.name === 'openrouter' && callIndex === 1,
+          });
         request.validateResponse?.(text);
         attempts.push({ provider: provider.name, model: provider.model, ok: true });
         return { provider: provider.name, model: provider.model, text, attempts };
@@ -451,8 +494,16 @@ export async function generateWithFallback(
         const status = errorStatus(error);
         const retryGemini = provider.name === 'gemini'
           && callIndex === 0
-          && typeof status === 'number'
-          && GEMINI_TRANSIENT_STATUSES.has(status);
+          && request.responseFormat === 'json'
+          && (
+            (typeof status === 'number' && GEMINI_TRANSIENT_STATUSES.has(status))
+            || status === undefined
+          );
+        const retryOpenRouter = provider.name === 'openrouter'
+          && callIndex === 0
+          && request.responseFormat === 'json'
+          && (status === 400 || status === undefined);
+        const reason = errorReason(error);
 
         attempts.push({
           provider: provider.name,
@@ -460,21 +511,29 @@ export async function generateWithFallback(
           ok: false,
           status,
           reason: retryGemini
-            ? `${errorReason(error)} · Gemini kısa gecikmeyle yeniden deneniyor.`
-            : errorReason(error),
+            ? `${reason} · Gemini JSON yanıtı bir kez yeniden deneniyor.`
+            : retryOpenRouter
+              ? `${reason} · OpenRouter structured JSON reddedildi; taşıma şeması olmadan yeniden deneniyor, içerik doğrulaması korunuyor.`
+              : reason,
         });
 
         if (retryGemini) {
           await sleep(GEMINI_RETRY_DELAY_MS);
           continue;
         }
+        if (retryOpenRouter) continue;
         break;
       }
     }
   }
 
   const summary = attempts
-    .map(attempt => `${attempt.provider}: ${attempt.status || attempt.reason || 'başarısız'}`)
+    .map(attempt => {
+      if (attempt.ok) return `${attempt.provider}: ok`;
+      const status = attempt.status ? `${attempt.status}` : '';
+      const reason = attempt.reason || 'başarısız';
+      return `${attempt.provider}: ${[status, reason].filter(Boolean).join(' ')}`;
+    })
     .join(' · ');
   const failure = new Error(`Tüm ücretsiz AI sağlayıcıları başarısız oldu.${summary ? ` ${summary}` : ''}`);
   Object.assign(failure, { attempts });
