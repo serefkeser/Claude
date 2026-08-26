@@ -13,6 +13,8 @@ const MAX_ANALYSIS_IMAGES = 3;
 const MAX_IMAGE_EDGE = 1600;
 const MAX_NEWSPAPER_IMAGE_EDGE = 2600;
 const ACCESS_TOKEN_STORAGE_KEY = 'hermes_ai_access_token';
+const ANALYZE_REQUEST_TIMEOUT_MS = 70_000;
+const TTS_REQUEST_TIMEOUT_MS = 70_000;
 
 export interface HermesVideoSlide {
   sourceHeadlineId?: string;
@@ -154,44 +156,89 @@ async function mediaToAnalysisImage(media: MediaFile, maxImageEdge = MAX_IMAGE_E
 async function request<T>(path: string, body: unknown, allowTokenPrompt = true): Promise<T> {
   const accessToken = localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)?.trim();
   const startedAt = performance.now();
+  const timeoutMs = path === '/analyze' ? ANALYZE_REQUEST_TIMEOUT_MS : TTS_REQUEST_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeoutHandle = window.setTimeout(() => controller.abort(), timeoutMs);
+  const progressHandles: number[] = [];
+
+  if (path === '/analyze') {
+    progressHandles.push(window.setTimeout(() => writeSystemLog(
+      'AI analizi sürüyor; Vision sağlayıcısı yanıtı bekleniyor.',
+      'info',
+    ), 10_000));
+    progressHandles.push(window.setTimeout(() => writeSystemLog(
+      'AI analizi devam ediyor; Worker gerekirse yapılandırılmış yedek Vision sağlayıcısına geçecek.',
+      'warn',
+    ), 25_000));
+    progressHandles.push(window.setTimeout(() => writeSystemLog(
+      'AI analizi halen sürüyor; 70 saniyelik güvenlik zaman aşımı aktif.',
+      'warn',
+    ), 45_000));
+  }
+
   writeSystemLog(`AI API isteği gönderiliyor: ${path}`);
   const endpoint = `${API_BASE}/ai${path}`;
-  const response = await fetchWithNetworkRetry(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { 'X-Hermes-Access': accessToken } : {}),
-    },
-    body: JSON.stringify(body),
-  }, {
-    endpoint: `/ai${path}`,
-    onRetry: (attempt, delayMs, reason) => writeSystemLog(
-      `AI API geçici bağlantı hatası: /ai${path} · ${reason} · ${attempt}. yeniden deneme ${delayMs} ms sonra.`,
-      'warn',
-    ),
-  });
-  const payload = await response.json().catch(() => null) as ApiEnvelope<T> | null;
-  const elapsedMs = Math.round(performance.now() - startedAt);
-  writeSystemLog(
-    `AI API yanıtı: ${path} · HTTP ${response.status} · ${elapsedMs} ms`,
-    response.ok ? 'info' : 'warn',
-  );
 
-  if (response.status === 401 && allowTokenPrompt) {
-    writeSystemLog('Hermes AI erişim anahtarı gerekli; kullanıcıdan güvenli giriş bekleniyor.', 'warn');
-    localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-    const supplied = window.prompt('Hermes AI erişim anahtarını girin. Bu değer yalnızca bu tarayıcıda saklanır.');
-    if (supplied?.trim()) {
-      localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, supplied.trim());
-      return request<T>(path, body, false);
+  try {
+    const response = await fetchWithNetworkRetry(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { 'X-Hermes-Access': accessToken } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    }, {
+      endpoint: `/ai${path}`,
+      onRetry: (attempt, delayMs, reason) => writeSystemLog(
+        `AI API geçici bağlantı hatası: /ai${path} · ${reason} · ${attempt}. yeniden deneme ${delayMs} ms sonra.`,
+        'warn',
+      ),
+    });
+
+    let payload: ApiEnvelope<T> | null = null;
+    try {
+      payload = await response.json() as ApiEnvelope<T>;
+    } catch (error) {
+      if (controller.signal.aborted) throw error;
     }
-  }
 
-  if (!response.ok || !payload?.success || !payload.data) {
-    writeSystemLog(`AI API başarısız: ${path} · ${payload?.error?.message || `HTTP ${response.status}`}`, 'error');
-    throw new Error(payload?.error?.message || `AI servisi yanıt vermedi (HTTP ${response.status}).`);
+    const elapsedMs = Math.round(performance.now() - startedAt);
+    writeSystemLog(
+      `AI API yanıtı: ${path} · HTTP ${response.status} · ${elapsedMs} ms`,
+      response.ok ? 'info' : 'warn',
+    );
+
+    if (response.status === 401 && allowTokenPrompt) {
+      writeSystemLog('Hermes AI erişim anahtarı gerekli; kullanıcıdan güvenli giriş bekleniyor.', 'warn');
+      localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+      const supplied = window.prompt('Hermes AI erişim anahtarını girin. Bu değer yalnızca bu tarayıcıda saklanır.');
+      if (supplied?.trim()) {
+        localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, supplied.trim());
+        return request<T>(path, body, false);
+      }
+    }
+
+    if (!response.ok || !payload?.success || !payload.data) {
+      writeSystemLog(`AI API başarısız: ${path} · ${payload?.error?.message || `HTTP ${response.status}`}`, 'error');
+      throw new Error(payload?.error?.message || `AI servisi yanıt vermedi (HTTP ${response.status}).`);
+    }
+    return payload.data;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      const seconds = Math.round(timeoutMs / 1000);
+      writeSystemLog(`AI API zaman aşımı: ${path} · ${seconds} saniye. İşlem kontrollü olarak durduruldu.`, 'error');
+      throw new Error(
+        path === '/analyze'
+          ? `AI analizi ${seconds} saniyede tamamlanmadı. Worker/AI sağlayıcı zinciri yanıt vermedi; tanı logu kaydedildi.`
+          : `TTS isteği ${seconds} saniyede tamamlanmadı; tanı logu kaydedildi.`,
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutHandle);
+    progressHandles.forEach(handle => window.clearTimeout(handle));
   }
-  return payload.data;
 }
 
 function normalizeScript(script: HermesScript): HermesScript {

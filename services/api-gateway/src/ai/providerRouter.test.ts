@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateWithFallback, getConfiguredProviders, synthesizeSpeech } from './providerRouter';
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -119,6 +120,41 @@ describe('AI provider fallback', () => {
       'https://openrouter.ai/api/v1/chat/completions',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('sağlayıcı başlıkları dönüp JSON gövdesini bitirmezse 20 saniyede keser', async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn().mockImplementation(async (_input: unknown, init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: () => new Promise((_resolve, reject) => {
+        const abort = () => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          reject(error);
+        };
+        if (init?.signal?.aborted) abort();
+        else init?.signal?.addEventListener('abort', abort, { once: true });
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = generateWithFallback({
+      ENVIRONMENT: 'production',
+      GROQ_API_KEY: 'groq-test',
+      AI_TEXT_PROVIDER_ORDER: 'groq',
+    }, {
+      task: 'text',
+      messages: [{ role: 'user', content: 'Yanıt üret.' }],
+      responseFormat: 'json',
+    });
+
+    const assertion = expect(pending).rejects.toThrow('Tüm ücretsiz AI sağlayıcıları başarısız oldu');
+    await vi.advanceTimersByTimeAsync(20_001);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('ZenMux ücretli fallbackini açık izin olmadan etkinleştirmez', () => {

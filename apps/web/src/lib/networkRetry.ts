@@ -32,7 +32,7 @@ export async function fetchWithNetworkRetry(
       await new Promise(resolve => setTimeout(resolve, delayMs));
     } catch (error) {
       lastError = error;
-      if (attempt === delays.length) break;
+      if (init.signal?.aborted || attempt === delays.length) break;
       const delayMs = delays[attempt];
       options.onRetry?.(
         attempt + 1,

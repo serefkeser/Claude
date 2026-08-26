@@ -130,14 +130,18 @@ const HERMES_RESPONSE_SCHEMA = {
   required: ['isContentUnreadable', 'videoSlides', 'thumbnailText', 'sonSoz', 'gununSorusu', 'lastQuote', 'sourceName', 'gazeteBasliklari'],
 };
 
-async function fetchWithTimeout(input: Parameters<typeof fetch>[0], init: RequestInit, timeoutMs = PROVIDER_TIMEOUT_MS) {
+async function withRequestTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = PROVIDER_TIMEOUT_MS,
+  label = 'Sağlayıcı',
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await operation(controller.signal);
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`Sağlayıcı ${Math.round(timeoutMs / 1000)} saniyede yanıt vermedi.`);
+    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      throw new Error(`${label} ${Math.round(timeoutMs / 1000)} saniyede yanıtını tamamlamadı.`);
     }
     throw error;
   } finally {
@@ -279,32 +283,35 @@ async function callOpenAiCompatible(
     body.reasoning_budget = Math.min(2048, Math.max(256, Math.floor((request.maxTokens ?? 4096) / 3)));
   }
 
-  const response = await fetchWithTimeout(provider.endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${provider.apiKey}`,
-      'Content-Type': 'application/json',
-      ...provider.extraHeaders,
-    },
-    body: JSON.stringify(body),
-  });
+  return withRequestTimeout(async signal => {
+    const response = await fetch(provider.endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${provider.apiKey}`,
+        'Content-Type': 'application/json',
+        ...provider.extraHeaders,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    const error = new Error(`${response.status} ${detail || response.statusText}`);
-    Object.assign(error, { status: response.status });
-    throw error;
-  }
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const error = new Error(`${response.status} ${detail || response.statusText}`);
+      Object.assign(error, { status: response.status });
+      throw error;
+    }
 
-  const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string | Array<{ text?: string }> | null } }>;
-  };
-  const content = payload.choices?.[0]?.message?.content;
-  const text = (typeof content === 'string'
-    ? content
-    : content?.map(part => part.text || '').join('') || '').trim();
-  if (!text) throw new Error('Sağlayıcı boş yanıt döndürdü.');
-  return text;
+    const payload = await response.json() as {
+      choices?: Array<{ message?: { content?: string | Array<{ text?: string }> | null } }>;
+    };
+    const content = payload.choices?.[0]?.message?.content;
+    const text = (typeof content === 'string'
+      ? content
+      : content?.map(part => part.text || '').join('') || '').trim();
+    if (!text) throw new Error('Sağlayıcı boş yanıt döndürdü.');
+    return text;
+  }, PROVIDER_TIMEOUT_MS, `Sağlayıcı ${provider.name}`);
 }
 
 function toGeminiParts(content: AiMessage['content']) {
@@ -331,41 +338,44 @@ async function callGemini(
       parts: toGeminiParts(message.content),
     }));
 
-  const response = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(provider.model)}:generateContent?key=${encodeURIComponent(provider.apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
-        generationConfig: {
-          temperature: request.temperature ?? 0.25,
-          maxOutputTokens: request.maxTokens ?? 4096,
-          ...(request.responseFormat === 'json'
-            ? { responseMimeType: 'application/json', responseSchema: HERMES_RESPONSE_SCHEMA }
-            : {}),
-        },
-      }),
-    },
-  );
+  return withRequestTimeout(async signal => {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(provider.model)}:generateContent?key=${encodeURIComponent(provider.apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
+          generationConfig: {
+            temperature: request.temperature ?? 0.25,
+            maxOutputTokens: request.maxTokens ?? 4096,
+            ...(request.responseFormat === 'json'
+              ? { responseMimeType: 'application/json', responseSchema: HERMES_RESPONSE_SCHEMA }
+              : {}),
+          },
+        }),
+        signal,
+      },
+    );
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    const error = new Error(`${response.status} ${detail || response.statusText}`);
-    Object.assign(error, { status: response.status });
-    throw error;
-  }
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const error = new Error(`${response.status} ${detail || response.statusText}`);
+      Object.assign(error, { status: response.status });
+      throw error;
+    }
 
-  const payload = await response.json() as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text = payload.candidates?.[0]?.content?.parts
-    ?.map(part => part.text || '')
-    .join('')
-    .trim();
-  if (!text) throw new Error('Gemini boş yanıt döndürdü.');
-  return text;
+    const payload = await response.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const text = payload.candidates?.[0]?.content?.parts
+      ?.map(part => part.text || '')
+      .join('')
+      .trim();
+    if (!text) throw new Error('Gemini boş yanıt döndürdü.');
+    return text;
+  }, PROVIDER_TIMEOUT_MS, 'Sağlayıcı gemini');
 }
 
 export async function generateWithFallback(
@@ -433,44 +443,46 @@ export async function synthesizeSpeech(
   }
 
   const model = env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts';
-  const response = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
+  return withRequestTimeout(async signal => {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
+            },
           },
-        },
-      }),
-    },
-    TTS_TIMEOUT_MS,
-  );
+        }),
+        signal,
+      },
+    );
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`Gemini TTS ${response.status}: ${detail || response.statusText}`);
-  }
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Gemini TTS ${response.status}: ${detail || response.statusText}`);
+    }
 
-  const payload = await response.json() as {
-    candidates?: Array<{
-      content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
-    }>;
-  };
-  const inlineData = payload.candidates?.[0]?.content?.parts
-    ?.find(part => part.inlineData?.data)
-    ?.inlineData;
-  if (!inlineData?.data) throw new Error('Gemini TTS boş ses döndürdü.');
+    const payload = await response.json() as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
+      }>;
+    };
+    const inlineData = payload.candidates?.[0]?.content?.parts
+      ?.find(part => part.inlineData?.data)
+      ?.inlineData;
+    if (!inlineData?.data) throw new Error('Gemini TTS boş ses döndürdü.');
 
-  return {
-    provider: 'gemini',
-    model,
-    audioData: inlineData.data,
-    mimeType: inlineData.mimeType || 'audio/L16;codec=pcm;rate=24000',
-    sampleRate: 24000,
-  };
+    return {
+      provider: 'gemini' as const,
+      model,
+      audioData: inlineData.data,
+      mimeType: inlineData.mimeType || 'audio/L16;codec=pcm;rate=24000',
+      sampleRate: 24000,
+    };
+  }, TTS_TIMEOUT_MS, 'Gemini TTS');
 }

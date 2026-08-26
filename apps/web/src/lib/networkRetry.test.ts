@@ -38,6 +38,25 @@ describe('fetchWithNetworkRetry', () => {
       delaysMs: [0],
     })).rejects.toThrow('OTONOM API bağlantısı kurulamadı (/ai/tts)');
   });
+
+  it('üst seviye zaman aşımı isteği iptal ederse tekrar deneme yapmaz', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      controller.abort();
+      const error = new Error('Aborted');
+      error.name = 'AbortError';
+      throw error;
+    });
+
+    await expect(fetchWithNetworkRetry('https://api.example.test/ai/analyze', {
+      signal: controller.signal,
+    }, {
+      endpoint: '/ai/analyze',
+      delaysMs: [0, 0, 0],
+    })).rejects.toThrow('OTONOM API bağlantısı kurulamadı (/ai/analyze)');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('network helpers', () => {

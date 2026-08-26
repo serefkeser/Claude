@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { buildNewspaperNarration } from './newspaperCopy';
 import { buildLockedNewspaperScript, type NewspaperScriptContract, type VerifiedNewspaperCandidate } from './newspaperPipeline';
 
 function story(id: string, text: string, detail: string, score: number): VerifiedNewspaperCandidate {
@@ -75,12 +76,17 @@ describe('Cumhuriyet gerçek ön sayfa regresyonu', () => {
     expect(result.videoSlides.every(slide => slide.topText === slide.sourceHeadline)).toBe(true);
   });
 
-  it('her haberi yalnız bir kez, kendi açıklamasıyla okur', () => {
+  it('her haberi yalnız bir kez, kendi doğrulanmış açıklamasından üretilen TTS metniyle okur', () => {
     const result = buildLockedNewspaperScript({ script: script(), candidates: cumhuriyetFrontPage });
     const ids = result.videoSlides.map(slide => slide.sourceHeadlineId);
     expect(new Set(ids).size).toBe(ids.length);
     result.videoSlides.forEach((slide, index) => {
-      expect(slide.spokenText).toContain(cumhuriyetFrontPage[index].detail);
+      const candidate = cumhuriyetFrontPage[index];
+      expect(slide.spokenText).toBe(buildNewspaperNarration({
+        sourceName: 'Cumhuriyet',
+        headline: candidate.text,
+        detail: candidate.detail,
+      }));
     });
   });
 });
