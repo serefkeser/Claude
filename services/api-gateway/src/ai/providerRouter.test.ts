@@ -199,9 +199,9 @@ describe('AI provider fallback', () => {
     expect(body.generationConfig.responseSchema.properties).not.toHaveProperty('thumbnailText');
   });
 
-  it('varsayılan production Vision zincirinde NVIDIA ve Groqyu çağırmaz', async () => {
+  it('varsayılan production Vision zincirinde güncel Groq Vision sağlayıcısını önce çağırır', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      candidates: [{ content: { parts: [{ text: '{"isContentUnreadable":false,"gazeteBasliklari":[]}' }] } }],
+      choices: [{ message: { content: '{"isContentUnreadable":false,"gazeteBasliklari":[]}' } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -219,9 +219,9 @@ describe('AI provider fallback', () => {
       responseSchema: 'newspaper',
     });
 
-    expect(result.provider).toBe('gemini');
+    expect(result.provider).toBe('groq');
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain('generativelanguage.googleapis.com');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('api.groq.com');
   });
 
   it('görsel görevinde metin-only OpenCode sağlayıcısını çağırmaz', async () => {

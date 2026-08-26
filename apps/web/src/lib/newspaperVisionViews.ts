@@ -35,11 +35,11 @@ const NEWSPAPER_VISION_VIEW_SPECS: NewspaperVisionViewSpec[] = [
   { label: 'alt yakın plan', topRatio: 0.38, heightRatio: 0.62, maxEdge: 2200, quality: 0.86 },
 ];
 
-const COMPOSITE_WIDTH = 2600;
-const COMPOSITE_HEIGHT = 2200;
-const COMPOSITE_PADDING = 24;
-const COMPOSITE_GAP = 24;
-const COMPOSITE_JPEG_QUALITY = 0.9;
+const COMPOSITE_WIDTH = 2200;
+const COMPOSITE_HEIGHT = 1900;
+const COMPOSITE_PADDING = 20;
+const COMPOSITE_GAP = 20;
+const COMPOSITE_JPEG_QUALITY = 0.84;
 
 export function getNewspaperVisionViewSpecs() {
   return NEWSPAPER_VISION_VIEW_SPECS.map(spec => ({ ...spec }));

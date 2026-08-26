@@ -7,7 +7,7 @@ afterEach(() => {
 });
 
 describe('NVIDIA newspaper Vision configuration', () => {
-  it('uses Nemotron Nano 12B VL and does not send text-only reasoning_budget', async () => {
+  it('uses current Nemotron 3 Nano Omni vision model and does not send text-only reasoning_budget', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"gazeteBasliklari":[]}' } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -31,12 +31,12 @@ describe('NVIDIA newspaper Vision configuration', () => {
     });
 
     expect(result.provider).toBe('nvidia');
-    expect(result.model).toBe('nvidia/nemotron-nano-12b-v2-vl');
+    expect(result.model).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning');
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const requestBody = JSON.parse(String(init.body || '{}')) as Record<string, unknown>;
-    expect(requestBody.model).toBe('nvidia/nemotron-nano-12b-v2-vl');
+    expect(requestBody.model).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning');
     expect(requestBody.reasoning_budget).toBeUndefined();
   });
 });

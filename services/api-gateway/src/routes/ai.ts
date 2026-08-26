@@ -166,7 +166,7 @@ aiRoutes.get('/health', c => c.json({
   data: {
     configured: getConfiguredProviders(c.env),
     textOrder: c.env.AI_TEXT_PROVIDER_ORDER || 'gemini,openrouter,groq,opencode,nvidia',
-    visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'gemini,nvidia,openrouter',
+    visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'groq,nvidia,gemini,openrouter',
     persistentMediaStorage: false,
   },
 }));

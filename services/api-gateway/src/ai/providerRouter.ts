@@ -89,10 +89,11 @@ interface ProviderDefinition {
 }
 
 const DEFAULT_TEXT_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'groq', 'opencode', 'nvidia'];
-const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'nvidia', 'openrouter'];
+const DEFAULT_VISION_ORDER: AiProviderName[] = ['groq', 'nvidia', 'gemini', 'openrouter'];
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_VISION_TIMEOUT_MS = 40_000;
 const OPENROUTER_VISION_TIMEOUT_MS = 55_000;
+const GROQ_VISION_TIMEOUT_MS = 55_000;
 const NVIDIA_VISION_TIMEOUT_MS = 55_000;
 const TTS_TIMEOUT_MS = 60_000;
 const GEMINI_RETRY_DELAY_MS = 750;
@@ -231,7 +232,7 @@ function getProviderDefinitions(env: AiProviderEnv, task: AiTask) {
       endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
       apiKey: env.NVIDIA_API_KEY,
       model: task === 'vision'
-        ? (env.NVIDIA_VISION_MODEL || 'nvidia/nemotron-nano-12b-v2-vl')
+        ? (env.NVIDIA_VISION_MODEL || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning')
         : (env.NVIDIA_TEXT_MODEL || 'nvidia/nemotron-3-nano-30b-a3b'),
       supportsVision: true,
       jsonMode: false,
@@ -325,6 +326,7 @@ function sleep(ms: number) {
 }
 
 function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRequest) {
+  if (request.task === 'vision' && provider.name === 'groq') return GROQ_VISION_TIMEOUT_MS;
   if (request.task === 'vision' && provider.name === 'nvidia') return NVIDIA_VISION_TIMEOUT_MS;
   if (request.task === 'vision' && provider.name === 'openrouter') return OPENROUTER_VISION_TIMEOUT_MS;
   return PROVIDER_TIMEOUT_MS;

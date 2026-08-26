@@ -7,7 +7,7 @@ afterEach(() => {
 });
 
 describe('newspaper single-image Vision fallback', () => {
-  it('Gemini iki kez doğrulamayı geçmezse doğrudan NVIDIA Vision sağlayıcısına geçer', async () => {
+  it('Gemini iki kez doğrulamayı geçmezse doğrudan Groq Vision sağlayıcısına geçer', async () => {
     const valid = '{"isContentUnreadable":false,"gazeteBasliklari":[{"baslik":"Birinci gerçek haber","aciklama":"Gazetede basılı gerçek açıklama cümlesi.","onem":100,"x":1,"y":1,"w":40,"h":10}]}';
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -24,9 +24,11 @@ describe('newspaper single-image Vision fallback', () => {
     const result = await generateWithFallback({
       ENVIRONMENT: 'production',
       GEMINI_API_KEY: 'gemini-test',
+      GROQ_API_KEY: 'groq-test',
       NVIDIA_API_KEY: 'nvidia-test',
       OPENROUTER_API_KEY: 'openrouter-test',
       ALLOW_NVIDIA_TRIAL: 'true',
+      AI_VISION_PROVIDER_ORDER: 'gemini,groq,nvidia,openrouter',
     }, {
       task: 'vision',
       messages: [{
@@ -43,9 +45,9 @@ describe('newspaper single-image Vision fallback', () => {
       },
     });
 
-    expect(result.provider).toBe('nvidia');
+    expect(result.provider).toBe('groq');
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[2][0])).toContain('integrate.api.nvidia.com');
+    expect(String(fetchMock.mock.calls[2][0])).toContain('api.groq.com');
 
     const nvidiaBody = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body)) as {
       messages: Array<{ content: Array<{ type: string }> }>;

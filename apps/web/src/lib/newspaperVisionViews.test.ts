@@ -20,8 +20,8 @@ describe('newspaper Vision views', () => {
   it('birleşik Vision görselinde tam sayfayı solda, yakın planları sağda ayrı panellerde tutar', () => {
     const layout = getNewspaperVisionCompositeLayout();
 
-    expect(layout.width).toBe(2600);
-    expect(layout.height).toBe(2200);
+    expect(layout.width).toBe(2200);
+    expect(layout.height).toBe(1900);
     expect(layout.fullPage.x + layout.fullPage.width).toBeLessThan(layout.upperZoom.x);
     expect(layout.upperZoom.x).toBe(layout.lowerZoom.x);
     expect(layout.upperZoom.y + layout.upperZoom.height).toBeLessThan(layout.lowerZoom.y);
