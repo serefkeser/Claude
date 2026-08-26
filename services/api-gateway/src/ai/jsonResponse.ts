@@ -100,6 +100,7 @@ function parseCandidate(candidate: string) {
 function scriptScore(value: JsonObject) {
   let score = Object.keys(value).length;
   if (Array.isArray(value.videoSlides)) score += 100 + value.videoSlides.length * 5;
+  if (Array.isArray(value.gazeteBasliklari)) score += 100 + value.gazeteBasliklari.length * 8;
   if (typeof value.thumbnailText === 'string') score += 10;
   if (typeof value.sonSoz === 'string') score += 10;
   if (typeof value.lastQuote === 'string') score += 5;
@@ -202,7 +203,10 @@ export function validateHermesNewspaperResponse(
   text: string,
   allowedCandidates: Array<string | NewspaperCandidateReference> = [],
 ) {
-  validateHermesScriptResponse(text);
+  // Gazete modunda ana sözleşme gazeteBasliklari'dır. videoSlides istemcide
+  // deterministik olarak yeniden kurulur; modelden aynı uzun metni iki kez
+  // istemek ücretsiz sağlayıcılarda gereksiz token tüketimi ve kırpılmış JSON
+  // üretiyordu.
   const script = parseAiJsonObject(text);
   const headlines = Array.isArray(script.gazeteBasliklari) ? script.gazeteBasliklari.filter(isObject) : [];
   const localIds = new Set(allowedCandidates
@@ -214,18 +218,15 @@ export function validateHermesNewspaperResponse(
   const requiredVisionCount = Math.max(0, 5 - localIds.size);
   if (requiredVisionCount === 0) return;
 
-  // Gazete sahneleri istemcide doğrulanmış adaylardan deterministik olarak
-  // yeniden kurulur. AI'nin videoSlides dizisini aynı kimliklerle tekrar
-  // üretmesini şart koşmak, gazeteBasliklari doğru olsa bile bütün sağlayıcı
-  // yanıtını gereksiz yere reddediyordu. Burada yalnız eksik yerel OCR sayısını
-  // tamamlayabilecek bağımsız tam-görsel haber önerilerini doğrularız; metin ve
-  // sayı kanıtı daha sonra cihazdaki OCR ile ayrıca çapraz kontrol edilir.
   const distinctVisionHeadlines = new Set(
     headlines
       .filter(headline => {
         const id = String(headline.sourceHeadlineId || '').toUpperCase();
         const normalized = normalizedHeadline(headline.baslik);
-        return (!id || !localIds.has(id)) && (!normalized || !localHeadlines.has(normalized));
+        const detail = String(headline.aciklama || '').replace(/\s+/g, ' ').trim();
+        return detail.length > 0
+          && (!id || !localIds.has(id))
+          && (!normalized || !localHeadlines.has(normalized));
       })
       .map(headline => normalizedHeadline(headline.baslik))
       .filter(Boolean),
