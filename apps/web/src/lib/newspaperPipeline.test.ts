@@ -79,6 +79,21 @@ describe('locked newspaper pipeline', () => {
     expect(() => assertLockedNewspaperScript(result, stories, 'BirGün')).not.toThrow();
   });
 
+  it('clickbait gazetenin doğrulanmış genel editoryal dilinden gelebilir', () => {
+    const script = aiScript();
+    script.thumbnailText = 'Saray şanslı müteahhitler';
+    const result = buildLockedNewspaperScript({ script, candidates: stories, configuredSourceName: 'BirGün' });
+    expect(result.thumbnailText).toBe('SARAY ŞANSLI MÜTEAHHİTLER!');
+  });
+
+  it('kaynakta bulunmayan ideolojik etiketli clickbait reddedilir', () => {
+    const script = aiScript();
+    script.thumbnailText = 'Solcu gazete öfkeli';
+    const result = buildLockedNewspaperScript({ script, candidates: stories, configuredSourceName: 'BirGün' });
+    expect(result.thumbnailText).not.toBe('SOLCU GAZETE ÖFKELİ!');
+    expect(result.thumbnailText).toBe('İŞSİZİN FONU DA PATRONA!');
+  });
+
   it('açıklaması tamamlanmayan haber kırıntısını sahneye almaz', () => {
     const incomplete = candidate('H6', 'CEZASIZLIK ZIRHI', 'Eksik açıklama', 1000);
     const result = buildLockedNewspaperScript({ script: aiScript(), candidates: [...stories, incomplete] });
