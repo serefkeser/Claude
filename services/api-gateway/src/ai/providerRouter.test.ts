@@ -64,6 +64,36 @@ describe('AI provider fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('Gemini 503 hatasını bir kez yeniden dener ve ikinci yanıtı kullanır', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('temporary unavailable', { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"videoSlides":[]}' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_TEXT_PROVIDER_ORDER: 'gemini',
+    }, {
+      task: 'text',
+      messages: [{ role: 'user', content: 'Yanıt üret.' }],
+      responseFormat: 'json',
+    });
+
+    await vi.advanceTimersByTimeAsync(751);
+    const result = await pending;
+
+    expect(result.provider).toBe('gemini');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.attempts).toEqual([
+      expect.objectContaining({ provider: 'gemini', ok: false, status: 503 }),
+      expect.objectContaining({ provider: 'gemini', ok: true }),
+    ]);
+  });
+
   it('görsel görevinde metin-only OpenCode sağlayıcısını çağırmaz', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"videoSlides":[]}' } }],
