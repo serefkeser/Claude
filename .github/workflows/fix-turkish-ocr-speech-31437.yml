@@ -1,0 +1,42 @@
+name: Fix Turkish OCR Speech 3.14.37
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/fix-turkish-ocr-speech-31437.mjs
+      - scripts/fix-turkish-speech-percent-31437.mjs
+      - .github/workflows/fix-turkish-ocr-speech-31437.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Apply Turkish OCR and speech fix
+        run: |
+          node scripts/fix-turkish-ocr-speech-31437.mjs
+          node scripts/fix-turkish-speech-percent-31437.mjs
+      - name: Verify version
+        run: node scripts/check-version-consistency.mjs
+      - name: Run focused tests
+        run: npm exec vitest -- run apps/web/src/lib/newspaperVisionRecovery.test.ts apps/web/src/lib/newspaperCopy.test.ts apps/web/src/lib/newspaperPipeline.test.ts
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/src/lib/newspaperVisionRecovery.ts apps/web/src/lib/newspaperVisionRecovery.test.ts apps/web/src/lib/newspaperCopy.ts apps/web/src/lib/newspaperCopy.test.ts package.json package-lock.json apps/web/package.json apps/web/src/version.ts packages/shared-config/package.json packages/shared-types/package.json packages/shared-utils/package.json services/api-gateway/package.json services/api-gateway/src/index.ts services/api-gateway/src/routes/health.ts services/media-storage/package.json services/video-renderer/package.json services/video-renderer/src/index.ts
+          git commit -m "fix: correct Turkish OCR text before narration"
+          git push
