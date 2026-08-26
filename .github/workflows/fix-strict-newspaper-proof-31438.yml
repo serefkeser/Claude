@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - scripts/fix-strict-newspaper-proof-31438.mjs
+      - scripts/fix-strict-newspaper-proof-followup-31438.mjs
       - .github/workflows/fix-strict-newspaper-proof-31438.yml
 
 permissions:
@@ -22,7 +23,9 @@ jobs:
           node-version: 20
       - run: npm install --no-audit --no-fund
       - name: Apply strict proof fix
-        run: node scripts/fix-strict-newspaper-proof-31438.mjs
+        run: |
+          node scripts/fix-strict-newspaper-proof-31438.mjs
+          node scripts/fix-strict-newspaper-proof-followup-31438.mjs
       - name: Verify version
         run: node scripts/check-version-consistency.mjs
       - name: Run focused tests
