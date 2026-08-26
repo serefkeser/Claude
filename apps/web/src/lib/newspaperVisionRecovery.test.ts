@@ -27,26 +27,31 @@ const visionCandidates: VisionNewspaperCandidate[] = [
     sourceHeadlineId: 'V1', baslik: 'Devlet ibadet dayatamaz',
     aciklama: 'Danıştay uygulamanın yöneticiler eliyle yapılacağı için zorlayıcı olacağını belirtti.',
     onem: 100, x: 20, y: 10, w: 75, h: 25,
+    localCropEvidence: 'Devlet ibadet DAYATAMAZ Danıştay uygulamanın yöneticiler eliyle yapılacağı için zorlayıcı olacağını belirtti.',
   },
   {
     sourceHeadlineId: 'V2', baslik: 'Baskın seçim planı',
     aciklama: 'Ortak liste için yeni kurallar getirilmesi beklendiği belirtildi.',
     onem: 90, x: 25, y: 40, w: 70, h: 20,
+    localCropEvidence: 'Baskın seçim planı Ortak liste için yeni kurallar getirilmesi beklendiği belirtildi.',
   },
   {
     sourceHeadlineId: 'V3', baslik: 'Transferle kazanamazsın',
     aciklama: 'Belediyelerin rekabetle kazanılır transferle seçim kazanılmaz dedi.',
     onem: 80, x: 25, y: 60, w: 60, h: 15,
+    localCropEvidence: 'Transferle kazanamazsın Belediyelerin rekabetle kazanılır transferle seçim kazanılmaz dedi.',
   },
   {
     sourceHeadlineId: 'V4', baslik: "Tarihin yönü Sakarya'da değişti",
     aciklama: 'Mustafa Kemal hattı müdafaa yoktur sathı müdafaa vardır emrini yayımladı.',
     onem: 70, x: 0, y: 20, w: 24, h: 20,
+    localCropEvidence: "Tarihin yönü Sakarya'da değişti Mustafa Kemal hattı müdafaa yoktur sathı müdafaa vardır emrini yayımladı.",
   },
   {
     sourceHeadlineId: 'V5', baslik: 'Netanyahu Türkleri kışkırtmaya çalışıyor',
     aciklama: "Barrack saldırı Türkiye'yi kışkırtma veya seçim hamlesiydi dedi.",
     onem: 60, x: 0, y: 70, w: 24, h: 16,
+    localCropEvidence: "Netanyahu Türkleri kışkırtmaya çalışıyor Barrack saldırı Türkiye'yi kışkırtma veya seçim hamlesiydi dedi.",
   },
 ];
 
@@ -88,7 +93,7 @@ describe('newspaper full-vision recovery', () => {
     });
 
     expect(result.candidates).toHaveLength(0);
-    expect(result.rejected[0]?.reason).toBe('başlık yerel OCR metniyle eşleşmedi');
+    expect(result.rejected[0]?.reason).toBe('aynı haber kutusundan bağımsız OCR kanıtı yok');
   });
 
   it('OCR metninde bulunmayan AI özetini veya uydurma açıklamayı sahneye almaz', () => {
@@ -105,7 +110,7 @@ describe('newspaper full-vision recovery', () => {
     });
 
     expect(result.candidates).toHaveLength(0);
-    expect(result.rejected[0]?.reason).toBe('açıklama yerel OCR metniyle eşleşmedi');
+    expect(result.rejected[0]?.reason).toBe('aynı haber kutusundan bağımsız OCR kanıtı yok');
   });
 
   it('aynı haberi yerel OCR ve görsel analizden iki kez eklemez; doğrulanmış temiz görsel metnini kullanır', () => {
@@ -153,7 +158,35 @@ describe('newspaper full-vision recovery', () => {
       localOcrText: "OCR TAM METİN: Tarihin akışı değişti SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
       maximumStories: 9,
     });
-    expect(wrongNumber.candidates[0].detail).toBe(local.detail);
+    expect(wrongNumber.candidates).toHaveLength(0);
+  });
+
+  it('anlamı benzer olsa bile gazetedeki cümleyi yeniden yazan AI açıklamasını reddeder', () => {
+    const local = localCandidate();
+    const result = recoverNewspaperCandidatesFromVision({
+      localCandidates: [local],
+      visionCandidates: [{
+        baslik: 'Devlet ibadet dayatamaz',
+        aciklama: 'Danıştay yöneticilerin uygulamasının zorlayıcı sonuç doğurabileceğini açıkladı.',
+        localCropEvidence: 'Devlet ibadet DAYATAMAZ Danıştay uygulamanın yöneticiler eliyle yapılacağı için zorlayıcı olacağını belirtti.',
+      }],
+      localOcrText: fullOcrText,
+      maximumStories: 9,
+    });
+    expect(result.candidates[0].detail).toBe(local.detail);
+  });
+
+  it('aynı haber kutusundan yakın OCR yoksa AI metniyle kelime düzeltmez', () => {
+    const result = recoverNewspaperCandidatesFromVision({
+      localCandidates: [localCandidate()],
+      visionCandidates: [{
+        baslik: 'Devlet ibadet dayatamaz',
+        aciklama: 'Danıştay uygulamanın yöneticiler eliyle yapılacağı için zorlayıcı olacağını belirtti.',
+      }],
+      localOcrText: fullOcrText,
+      maximumStories: 9,
+    });
+    expect(result.candidates).toHaveLength(0);
   });
 
   it('tam sayfa OCR sütunu parçalasa bile aynı haber kutusunun yerel yakın okumasıyla doğrular', () => {

@@ -127,7 +127,7 @@ function hasRequiredEvidence(proposedText: string, evidenceText: string, minimum
   return evidence.factsMatch && evidence.coverage >= minimumCoverage;
 }
 
-function validateVisionCandidate(candidate: VisionNewspaperCandidate, rawOcrText: string) {
+function validateVisionCandidate(candidate: VisionNewspaperCandidate, rawOcrText: string, strictCropOnly = false) {
   const headline = normalizeVisibleText(candidate.baslik);
   const detail = normalizeVisibleText(candidate.aciklama);
   const rejectionReason = newspaperHeadlineRejectionReason(headline);
@@ -136,13 +136,18 @@ function validateVisionCandidate(candidate: VisionNewspaperCandidate, rawOcrText
   if (!isReliableNewspaperDetail(detail)) return 'tam bir haber açıklaması değil';
 
   const headlineTokenCount = tokens(headline).length;
-  const requiredHeadlineCoverage = headlineTokenCount <= 4 ? 1 : 0.8;
-  const evidenceSources = [candidate.localCropEvidence || '', rawOcrText].filter(Boolean);
+  const requiredHeadlineCoverage = headlineTokenCount <= 4 ? 1 : (strictCropOnly ? 0.95 : 0.8);
+  const requiredDetailCoverage = strictCropOnly ? 0.95 : 0.78;
+  const cropEvidence = normalizeVisibleText(candidate.localCropEvidence || '');
+  const evidenceSources = strictCropOnly
+    ? (cropEvidence ? [cropEvidence] : [])
+    : [cropEvidence, rawOcrText].filter(Boolean);
+  if (!evidenceSources.length) return 'aynı haber kutusundan bağımsız OCR kanıtı yok';
   if (!evidenceSources.some(evidence => hasRequiredEvidence(headline, evidence, requiredHeadlineCoverage))) {
-    return 'başlık yerel OCR metniyle eşleşmedi';
+    return 'başlık aynı haber kutusundaki OCR ile yeterince eşleşmedi';
   }
-  if (!evidenceSources.some(evidence => hasRequiredEvidence(detail, evidence, 0.78))) {
-    return 'açıklama yerel OCR metniyle eşleşmedi';
+  if (!evidenceSources.some(evidence => hasRequiredEvidence(detail, evidence, requiredDetailCoverage))) {
+    return 'açıklama aynı haber kutusundaki OCR ile yeterince eşleşmedi';
   }
   return '';
 }
@@ -176,23 +181,13 @@ export function recoverNewspaperCandidatesFromVision(options: {
     });
 
   const ordered: Array<VerifiedNewspaperCandidate & { recovered: boolean }> = [];
+  const rejectedLocalCandidateIds = new Set<string>();
   for (const proposal of proposals) {
     const headline = normalizeVisibleText(proposal.baslik);
     if (!headline || ordered.some(candidate => isDuplicateHeadline(candidate.text, headline))) continue;
     const localMatch = options.localCandidates.find(candidate => isDuplicateHeadline(candidate.text, headline));
     if (localMatch) {
-      // Görsel model aynı haber bölgesini yerel OCR ile yüksek oranda doğruluyorsa,
-      // yazım/kelime hatalarını görseldeki temiz metinle düzeltebilir. Sayı, tarih,
-      // skor, yüzde ve para olguları validateVisionCandidate içinde yine OCR ile
-      // birebir eşleşmek zorundadır. Böylece “SÜYÜK / MN aylık” gibi OCR
-      // bozulmaları seslendirmeye taşınmaz; AI'nin uydurma metni ise geçemez.
-      const localCorrectionEvidence = [
-        proposal.localCropEvidence || '',
-        localMatch.text,
-        localMatch.detail,
-        evidence,
-      ].filter(Boolean).join(' ');
-      const correctionReason = validateVisionCandidate(proposal, localCorrectionEvidence);
+      const correctionReason = validateVisionCandidate(proposal, '', true);
       if (!correctionReason) {
         ordered.push({
           ...localMatch,
@@ -200,13 +195,28 @@ export function recoverNewspaperCandidatesFromVision(options: {
           detail: normalizeVisibleText(proposal.aciklama),
           recovered: false,
         });
-      } else {
+        continue;
+      }
+
+      const localAsProposal: VisionNewspaperCandidate = {
+        baslik: localMatch.text,
+        aciklama: localMatch.detail,
+        localCropEvidence: proposal.localCropEvidence,
+      };
+      const localReason = validateVisionCandidate(localAsProposal, '', true);
+      if (!localReason) {
         ordered.push({ ...localMatch, recovered: false });
+      } else {
+        rejectedLocalCandidateIds.add(localMatch.id);
+        rejected.push({
+          headline,
+          reason: 'aynı haber kutusunda güvenilir cümle mutabakatı yok: ' + correctionReason + ' / ' + localReason,
+        });
       }
       continue;
     }
 
-    const reason = validateVisionCandidate(proposal, evidence);
+    const reason = validateVisionCandidate(proposal, '', true);
     if (reason) {
       rejected.push({ headline, reason });
       continue;
@@ -229,7 +239,8 @@ export function recoverNewspaperCandidatesFromVision(options: {
   }
 
   for (const candidate of options.localCandidates) {
-    if (!ordered.some(existing => isDuplicateHeadline(existing.text, candidate.text))) {
+    if (!rejectedLocalCandidateIds.has(candidate.id)
+      && !ordered.some(existing => isDuplicateHeadline(existing.text, candidate.text))) {
       ordered.push({ ...candidate, recovered: false });
     }
   }
