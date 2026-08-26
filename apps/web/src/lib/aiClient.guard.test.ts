@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 
-describe('gazete vision crop evidence orchestration', () => {
-  it('yerel OCR tam 5 aday bulsa bile Vision kutularının yakın OCR ile zenginleştirilmesini engellemez', () => {
+describe('gazete Vision-first orchestration', () => {
+  it('Hermes 10 gibi gazete sahne metnini yerel OCR ile ezmez', () => {
     const source = fs.readFileSync(new URL('./aiClient.ts', import.meta.url), 'utf8');
-    expect(source).not.toContain('localCandidates.length < 5');
-    expect(source).toContain("options.inputType === 'gazete'\n    && imageCandidates[0]\n    && result.script.visionGazeteBasliklari?.length");
-    expect(source).toContain('addLocalCropEvidenceToVisionCandidates');
+    expect(source).not.toContain('extractTextLocally(');
+    expect(source).not.toContain('recoverNewspaperCandidatesFromVision');
+    expect(source).not.toContain('addLocalCropEvidenceToVisionCandidates');
+    expect(source).toContain('Hermes 10 gazete okuma modu');
+    expect(source).toContain('buildHermes10NewspaperCandidates');
+    expect(source).toContain('Yerel Tesseract OCR gazete başlığını veya cümlesini değiştirmeyecek');
   });
 });
