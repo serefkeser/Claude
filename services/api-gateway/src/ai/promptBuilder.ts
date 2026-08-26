@@ -57,15 +57,12 @@ GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI:
 7. Sayı, tarih, yüzde, para, kişi, kurum ve yer adlarını gördüğün biçimde koru. Emin olmadığın haberi atla.
 8. Reklam, ilan, bulmaca, masthead/logo, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
 9. Koordinatlar tam sayfa için sol üst 0,0; sağ alt 100,100 olacak şekilde yüzde cinsinden yaklaşık x/y/w/h değerleridir. Yakın plan kullanarak okusan bile koordinatı tam sayfaya göre yaklaşıkla.
-10. thumbnailText 3-4 kelimelik clickbait olmalı ve yalnız gazetenin gerçek başlık/spot dilindeki vurguya dayanmalı.
-11. En az 5 gerçek başlık+açıklama okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için tahmin üretme.
-12. Başlık ve açıklama dışında video sahnesi, son söz, soru veya kapanış üretme; bunları istemci oluşturacak.
+10. En az 5 gerçek başlık+açıklama okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için tahmin üretme.
+11. Başlık ve açıklama dışında video sahnesi, kapak metni, son söz, soru, kapanış veya ek alan üretme; bunları istemci doğrulanmış başlıklardan oluşturacak.
 
 Yalnız şu JSON yapısını döndür:
 {
   "isContentUnreadable": boolean,
-  "sourceName": string,
-  "thumbnailText": string,
   "gazeteBasliklari": [
     {"baslik": string, "aciklama": string, "onem": number, "x": number, "y": number, "w": number, "h": number}
   ]
@@ -129,7 +126,7 @@ export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
   parts.push({
     type: 'text',
     text: isGazete
-      ? `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nAynı gazete sayfasının görünümlerini birlikte incele, tekrarları birleştir ve yalnız gazete JSON yapısını döndür.`
+      ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nAynı gazete sayfasının görünümlerini birlikte incele, tekrarları birleştir ve yalnız isContentUnreadable + gazeteBasliklari JSON yapısını döndür.`
       : `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nİçerik türü: ${config.tip || 'haber'}\nVideo stili: ${config.videoStyle || 'cinematic'}\nEk kullanıcı yorumu: ${config.yorum || 'yok'}\nİçeriği analiz et ve yalnız şemaya uyan JSON döndür.`,
   });
 
