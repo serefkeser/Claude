@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { RenderConfig } from '@otonom/shared-types';
-import { buildRenderStoryboard, getStoryboardNarration } from './storyboard';
+import {
+  buildRenderStoryboard,
+  getStoryboardNarration,
+  selectRotatingFinalWord,
+  TURKISH_FINAL_WORDS,
+} from './storyboard';
 
 const config = {
   duration: '30', aspectRatio: '9:16', videoStyle: 'cinematic', fontStyle: 'modern',
@@ -25,15 +30,17 @@ describe('buildRenderStoryboard', () => {
     expect(getStoryboardNarration(scenes)).toContain('Abone olmayı');
   });
 
-  it('AI son sözü son haber cümlesiyle tekrarlarsa güvenli son söz kullanır', () => {
+  it('AI son sözü son haber cümlesiyle tekrarlarsa havuzdan yol gösterici söz kullanır', () => {
     const scenes = buildRenderStoryboard({
       sonSoz: 'Gerçek ortaya çıktı.',
       videoSlides: [{ topText: 'SONUÇ', spokenText: 'Gerçek ortaya çıktı.', imagePrompts: [] }],
-    }, config);
-    expect(scenes.find(scene => scene.kind === 'final')?.spokenText).toContain('er ya da geç');
+    }, config, new Date('2026-08-16T12:01:00Z'));
+    const finalText = scenes.find(scene => scene.kind === 'final')?.spokenText || '';
+    expect(finalText).not.toContain('Gerçek ortaya çıktı');
+    expect(finalText).toMatch(/—/);
   });
 
-  it('gazetede tek clickbait, en az beş başlık-detay, son söz ve outro sırasını korur', () => {
+  it('gazetede tek clickbait, en az beş başlık-detay, değişken Son Söz ve outro sırasını korur', () => {
     const headlines = Array.from({ length: 5 }, (_, index) => ({
       sourceHeadlineId: `H${index + 1}`,
       baslik: `Doğrulanmış başlık ${index + 1}`,
@@ -42,7 +49,7 @@ describe('buildRenderStoryboard', () => {
     }));
     const scenes = buildRenderStoryboard({
       thumbnailText: 'GERÇEK NE?',
-      sonSoz: 'Doğru haber, doğrulanmış bilgidir.',
+      sonSoz: '',
       lastQuote: '',
       gununSorusu: '',
       gazeteBasliklari: headlines,
@@ -64,7 +71,18 @@ describe('buildRenderStoryboard', () => {
       expect(scenes[index + 1].topText).toBe(item.baslik);
       expect(scenes[index + 1].spokenText).toBe(`${item.baslik}. ${item.aciklama}`);
     });
-    expect(scenes.at(-2)?.kind).toBe('final');
+    const finalScene = scenes.at(-2);
+    expect(finalScene?.kind).toBe('final');
+    expect(finalScene?.spokenText).toMatch(/— (Mustafa Kemal Atatürk|Sokrates|René Descartes|Francis Bacon|Yunus Emre|Epiktetos|Türk atasözü)/);
     expect(scenes.at(-1)?.spokenText).toContain('Abone olmayı');
+  });
+
+  it('Son Söz havuzu sabit tek cümleye bağlı değildir', () => {
+    expect(TURKISH_FINAL_WORDS.length).toBeGreaterThanOrEqual(12);
+    const first = selectRotatingFinalWord('seed-a');
+    const second = selectRotatingFinalWord('seed-b');
+    expect(first).toMatch(/—/);
+    expect(second).toMatch(/—/);
+    expect(TURKISH_FINAL_WORDS.some(item => first.includes(item.author))).toBe(true);
   });
 });
