@@ -4,6 +4,31 @@ function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isNewspaperHeadline(value: unknown): value is JsonObject {
+  return isObject(value)
+    && typeof value.baslik === 'string'
+    && value.baslik.trim().length > 0
+    && typeof value.aciklama === 'string'
+    && value.aciklama.trim().length > 0;
+}
+
+function wrapNewspaperArray(value: unknown): JsonObject | null {
+  if (!Array.isArray(value)) return null;
+  const headlines = value.filter(isNewspaperHeadline);
+  if (!headlines.length) return null;
+  return {
+    isContentUnreadable: headlines.length < 5,
+    videoSlides: [],
+    thumbnailText: String(headlines[0].baslik || 'GÜNDEM')
+      .split(/\s+/)
+      .slice(0, 4)
+      .join(' ')
+      .toLocaleUpperCase('tr-TR'),
+    sourceName: '',
+    gazeteBasliklari: headlines,
+  };
+}
+
 function removeTrailingCommas(text: string) {
   let result = '';
   let inString = false;
@@ -73,11 +98,26 @@ function extractBalancedObjects(text: string) {
 }
 
 function unwrapKnownEnvelope(value: unknown): JsonObject | null {
+  const directArray = wrapNewspaperArray(value);
+  if (directArray) return directArray;
   if (!isObject(value)) return null;
-  if (Array.isArray(value.videoSlides)) return value;
+  if (Array.isArray(value.videoSlides) || Array.isArray(value.gazeteBasliklari)) return value;
   for (const key of ['script', 'data', 'result', 'output']) {
     const nested = value[key];
-    if (isObject(nested) && Array.isArray(nested.videoSlides)) return nested;
+    const nestedArray = wrapNewspaperArray(nested);
+    if (nestedArray) return nestedArray;
+    if (isObject(nested) && (Array.isArray(nested.videoSlides) || Array.isArray(nested.gazeteBasliklari))) return nested;
+  }
+  for (const key of ['headlines', 'stories', 'news', 'basliklar']) {
+    const wrapped = wrapNewspaperArray(value[key]);
+    if (wrapped) {
+      return {
+        ...value,
+        ...wrapped,
+        sourceName: typeof value.sourceName === 'string' ? value.sourceName : wrapped.sourceName,
+        thumbnailText: typeof value.thumbnailText === 'string' ? value.thumbnailText : wrapped.thumbnailText,
+      };
+    }
   }
   return value;
 }
@@ -87,7 +127,7 @@ function parseCandidate(candidate: string) {
   for (const attempt of attempts) {
     try {
       let parsed: unknown = JSON.parse(attempt);
-      if (typeof parsed === 'string' && parsed.trim().startsWith('{')) parsed = JSON.parse(parsed);
+      if (typeof parsed === 'string' && /^[\[{]/.test(parsed.trim())) parsed = JSON.parse(parsed);
       const object = unwrapKnownEnvelope(parsed);
       if (object) return object;
     } catch {
@@ -151,13 +191,7 @@ function salvageTruncatedNewspaper(text: string): JsonObject | null {
 
   const headlines = extractBalancedObjects(text.slice(arrayStart + 1))
     .map(candidate => parseCandidate(candidate))
-    .filter((candidate): candidate is JsonObject => Boolean(
-      candidate
-      && typeof candidate.baslik === 'string'
-      && candidate.baslik.trim()
-      && typeof candidate.aciklama === 'string'
-      && candidate.aciklama.trim(),
-    ));
+    .filter(isNewspaperHeadline);
   if (!headlines.length) return null;
 
   const thumbnail = extractStringField(text, 'thumbnailText')
@@ -197,7 +231,6 @@ export function parseAiJsonObject(text: string) {
     const parsed = parseCandidate(candidate);
     if (!parsed) continue;
     const score = scriptScore(parsed);
-    // Eşit puanda sondaki blok tercih edilir; modeller önce örnek, sonra sonuç yazabiliyor.
     if (score >= bestScore) {
       best = parsed;
       bestScore = score;
@@ -214,8 +247,6 @@ export function parseAiJsonObject(text: string) {
   const salvaged = salvageTruncatedScript(clean);
   const bestSlideCount = Array.isArray(best?.videoSlides) ? best.videoSlides.length : 0;
   const salvagedSlideCount = Array.isArray(salvaged?.videoSlides) ? salvaged.videoSlides.length : 0;
-  // Kurtarma nesnesindeki varsayılan alanlar puanı yapay biçimde yükseltmemeli;
-  // geçerli tam JSON varsa onun gazeteBasliklari gibi alanlarını koru.
   if (salvaged && (!best || salvagedSlideCount > bestSlideCount)) best = salvaged;
 
   if (!best) throw new Error('AI yanıtı geçerli JSON değil. Diğer ücretsiz sağlayıcı deneniyor.');
@@ -246,10 +277,6 @@ export function validateHermesNewspaperResponse(
   text: string,
   allowedCandidates: Array<string | NewspaperCandidateReference> = [],
 ) {
-  // Gazete modunda ana sözleşme gazeteBasliklari'dır. videoSlides istemcide
-  // deterministik olarak yeniden kurulur; modelden aynı uzun metni iki kez
-  // istemek ücretsiz sağlayıcılarda gereksiz token tüketimi ve kırpılmış JSON
-  // üretiyordu.
   const script = parseAiJsonObject(text);
   const headlines = Array.isArray(script.gazeteBasliklari) ? script.gazeteBasliklari.filter(isObject) : [];
   const localIds = new Set(allowedCandidates
