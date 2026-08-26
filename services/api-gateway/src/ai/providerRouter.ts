@@ -465,14 +465,15 @@ export async function synthesizeSpeech(
   text: string,
   voice = 'Aoede',
 ): Promise<AiSpeechResult> {
-  if (!env.GEMINI_API_KEY) {
+  const geminiApiKey = env.GEMINI_API_KEY;
+  if (!geminiApiKey) {
     throw new Error('Türkçe TTS için GEMINI_API_KEY yapılandırılmamış.');
   }
 
   const model = env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts';
   return withRequestTimeout(async signal => {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
