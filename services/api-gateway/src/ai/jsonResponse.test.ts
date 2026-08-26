@@ -87,9 +87,9 @@ describe('AI JSON response parser', () => {
     expect(result.gazeteBasliklari).toHaveLength(5);
   });
 
-  it('başlığı var ama açıklaması olmayan ham diziyi haber olarak kurtarmaz', () => {
+  it('başlığı var ama açıklaması olmayan ham diziyi geçerli gazete yanıtı saymaz', () => {
     const response = JSON.stringify(Array.from({ length: 5 }, (_, index) => ({ baslik: `Eksik ${index + 1}` })));
-    expect(() => parseAiJsonObject(response)).toThrow('geçerli JSON değil');
+    expect(() => validateHermesNewspaperResponse(response)).toThrow('5 yeni tam-görsel haber bölgesi');
   });
 
   it('gazete yanıtında en az 5 farklı kaynak başlığı ister', () => {
