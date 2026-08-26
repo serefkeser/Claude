@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { MediaFile } from '@otonom/shared-types';
 import { ChevronDown, FolderOpen, Music, Pause, Play, Volume2 } from './icons';
-import { loadAutomaticDriveMusic } from '../lib/driveMusic';
+import {
+  loadAutomaticDriveMusic,
+  loadDriveMusicCatalog,
+  loadDriveMusicTrack,
+  type DriveMusicTrack,
+} from '../lib/driveMusic';
 
 interface BackgroundMusicPickerProps {
   value: MediaFile | null;
@@ -39,8 +44,10 @@ export function BackgroundMusicPicker({ value, volume, onChange, onVolumeChange 
   const audioRef = useRef<HTMLAudioElement>(null);
   const activeUrlRef = useRef<string | null>(null);
   const [tracks, setTracks] = useState<LocalMusicTrack[]>([]);
+  const [driveTracks, setDriveTracks] = useState<DriveMusicTrack[]>([]);
   const [message, setMessage] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isDriveLoading, setIsDriveLoading] = useState(false);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -48,6 +55,25 @@ export function BackgroundMusicPicker({ value, volume, onChange, onVolumeChange 
 
     input.setAttribute('webkitdirectory', '');
     input.setAttribute('directory', '');
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMessage('Google Drive müzik kataloğu yükleniyor...');
+
+    loadDriveMusicCatalog()
+      .then(catalog => {
+        if (cancelled) return;
+        const sorted = [...catalog].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+        setDriveTracks(sorted);
+        setMessage(`${sorted.length} Google Drive müziği hazır`);
+      })
+      .catch(error => {
+        if (cancelled) return;
+        setMessage(error instanceof Error ? error.message : 'Google Drive müzik kataloğu yüklenemedi.');
+      });
+
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -96,7 +122,7 @@ export function BackgroundMusicPicker({ value, volume, onChange, onVolumeChange 
     }
   }, [value]);
 
-  const selectTrack = (track: LocalMusicTrack | null) => {
+  const selectLocalTrack = (track: LocalMusicTrack | null) => {
     audioRef.current?.pause();
     setIsPlaying(false);
 
@@ -136,14 +162,44 @@ export function BackgroundMusicPicker({ value, volume, onChange, onVolumeChange 
     }
 
     setTracks(audioTracks);
-    setMessage(`${audioTracks.length} müzik bulundu — dosyalar yerel olarak listeleniyor`);
-    // Klasör seçmek müziği kendiliğinden etkinleştirmesin; kullanıcı parçayı menüden seçsin.
-    selectTrack(null);
+    setMessage(`${audioTracks.length} yerel müzik bulundu`);
+    selectLocalTrack(null);
   };
 
-  const handleTrackChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const track = tracks.find(item => item.id === event.target.value) || null;
-    selectTrack(track);
+  const handleTrackChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedId = event.target.value;
+
+    if (!selectedId) {
+      selectLocalTrack(null);
+      return;
+    }
+
+    if (selectedId.startsWith('drive-')) {
+      const driveId = selectedId.slice('drive-'.length);
+      const track = driveTracks.find(item => item.id === driveId);
+      if (!track) {
+        setMessage('Seçilen Google Drive müziği katalogda bulunamadı.');
+        return;
+      }
+
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      setIsDriveLoading(true);
+      setMessage(`${track.name} Google Drive’dan yükleniyor...`);
+      try {
+        const media = await loadDriveMusicTrack(track);
+        onChange(media);
+        setMessage(`Google Drive müziği seçildi: ${track.name}`);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : 'Google Drive müziği yüklenemedi.');
+      } finally {
+        setIsDriveLoading(false);
+      }
+      return;
+    }
+
+    const track = tracks.find(item => item.id === selectedId) || null;
+    selectLocalTrack(track);
   };
 
   const togglePreview = async () => {
@@ -186,22 +242,31 @@ export function BackgroundMusicPicker({ value, volume, onChange, onVolumeChange 
             <div className="relative flex items-center gap-2">
               {value ? <Music size={14} className="shrink-0 text-indigo-400" /> : <span aria-hidden="true">🔇</span>}
               <span className="truncate text-xs font-bold text-white">
-                {value?.name || 'Arka Ses Yok'}
+                {isDriveLoading ? 'Müzik yükleniyor...' : value?.name || 'Arka Ses Yok'}
               </span>
               <ChevronDown size={14} className="ml-auto shrink-0 text-slate-400" />
               <select
                 aria-label="Arka plan müziği"
                 value={value?.id || ''}
                 onChange={handleTrackChange}
-                className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+                disabled={isDriveLoading}
+                className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 disabled:cursor-wait"
               >
                 <option value="">Arka Ses Yok</option>
-                {value?.id.startsWith('drive-') && (
-                  <option value={value.id}>{value.name}</option>
+                {driveTracks.length > 0 && (
+                  <optgroup label={`Google Drive (${driveTracks.length})`}>
+                    {driveTracks.map(track => (
+                      <option key={track.id} value={`drive-${track.id}`}>{track.name}</option>
+                    ))}
+                  </optgroup>
                 )}
-                {tracks.map(track => (
-                  <option key={track.id} value={track.id}>{track.label}</option>
-                ))}
+                {tracks.length > 0 && (
+                  <optgroup label={`Yerel Müzikler (${tracks.length})`}>
+                    {tracks.map(track => (
+                      <option key={track.id} value={track.id}>{track.label}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
           </div>
