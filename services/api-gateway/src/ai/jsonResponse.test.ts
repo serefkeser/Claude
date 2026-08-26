@@ -57,6 +57,41 @@ describe('AI JSON response parser', () => {
     expect(() => validateHermesNewspaperResponse(truncated)).not.toThrow();
   });
 
+  it('model doğrudan gazete haber dizisi döndürürse güvenli biçimde sarar', () => {
+    const response = JSON.stringify(Array.from({ length: 5 }, (_, index) => ({
+      baslik: `Başlık ${index + 1}`,
+      aciklama: `Basılı açıklama ${index + 1}.`,
+      onem: 100 - index,
+      x: 1,
+      y: index * 10,
+      w: 40,
+      h: 8,
+    })));
+
+    const result = parseAiJsonObject(response);
+    expect(result.gazeteBasliklari).toHaveLength(5);
+    expect(() => validateHermesNewspaperResponse(response)).not.toThrow();
+  });
+
+  it('headlines zarfındaki gerçek gazete dizisini kabul eder', () => {
+    const response = JSON.stringify({
+      sourceName: 'Cumhuriyet',
+      headlines: Array.from({ length: 5 }, (_, index) => ({
+        baslik: `Gazete haberi ${index + 1}`,
+        aciklama: `Gazetede görülen açıklama ${index + 1}.`,
+      })),
+    });
+
+    const result = parseAiJsonObject(response);
+    expect(result.sourceName).toBe('Cumhuriyet');
+    expect(result.gazeteBasliklari).toHaveLength(5);
+  });
+
+  it('başlığı var ama açıklaması olmayan ham diziyi haber olarak kurtarmaz', () => {
+    const response = JSON.stringify(Array.from({ length: 5 }, (_, index) => ({ baslik: `Eksik ${index + 1}` })));
+    expect(() => parseAiJsonObject(response)).toThrow('geçerli JSON değil');
+  });
+
   it('gazete yanıtında en az 5 farklı kaynak başlığı ister', () => {
     const repeatedStory = JSON.stringify({
       videoSlides: Array.from({ length: 6 }, (_, index) => ({
