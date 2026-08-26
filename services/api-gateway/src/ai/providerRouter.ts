@@ -90,6 +90,7 @@ interface ProviderDefinition {
 const DEFAULT_TEXT_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'groq', 'opencode', 'nvidia'];
 const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'nvidia', 'groq'];
 const PROVIDER_TIMEOUT_MS = 20_000;
+const GEMINI_VISION_TIMEOUT_MS = 40_000;
 const TTS_TIMEOUT_MS = 60_000;
 const GEMINI_RETRY_DELAY_MS = 750;
 const GEMINI_TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
@@ -387,7 +388,7 @@ async function callGemini(
       .trim();
     if (!text) throw new Error('Gemini boş yanıt döndürdü.');
     return text;
-  }, PROVIDER_TIMEOUT_MS, 'Sağlayıcı gemini');
+  }, request.task === 'vision' ? GEMINI_VISION_TIMEOUT_MS : PROVIDER_TIMEOUT_MS, 'Sağlayıcı gemini');
 }
 
 export async function generateWithFallback(
