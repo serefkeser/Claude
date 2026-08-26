@@ -1,4 +1,4 @@
-# OTONOM 3.14.49 production deploy · current Groq + NVIDIA Vision · release
+# OTONOM 3.14.49 production deploy · current Groq + NVIDIA Vision · production verification
 name = "api"
 main = "src/index.ts"
 compatibility_date = "2024-01-15"
