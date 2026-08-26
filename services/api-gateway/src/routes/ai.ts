@@ -166,7 +166,7 @@ aiRoutes.get('/health', c => c.json({
   data: {
     configured: getConfiguredProviders(c.env),
     textOrder: c.env.AI_TEXT_PROVIDER_ORDER || 'gemini,openrouter,groq,opencode,nvidia',
-    visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'gemini,openrouter,groq,nvidia',
+    visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'gemini,openrouter',
     persistentMediaStorage: false,
   },
 }));
@@ -214,18 +214,20 @@ aiRoutes.post('/analyze', async c => {
 
   try {
     const ocrCandidates = parseOcrHeadlineCandidates(body.text || '');
+    const isNewspaper = body.inputType === 'gazete';
     const generated = await generateWithFallback(c.env, {
       task: images.length ? 'vision' : 'text',
       messages: buildAnalyzeMessages({ ...body, images }),
-      temperature: body.inputType === 'gazete' ? 0.1 : 0.2,
-      maxTokens: 6144,
+      temperature: isNewspaper ? 0.05 : 0.2,
+      maxTokens: isNewspaper ? 4096 : 6144,
       responseFormat: 'json',
-      validateResponse: body.inputType === 'gazete'
+      responseSchema: isNewspaper ? 'newspaper' : 'hermes',
+      validateResponse: isNewspaper
         ? text => validateHermesNewspaperResponse(text, [])
         : validateHermesScriptResponse,
     });
     const parsedScript = parseAiJsonObject(generated.text);
-    const script = body.inputType === 'gazete'
+    const script = isNewspaper
       ? normalizeNewspaperScript(parsedScript, ocrCandidates)
       : parsedScript;
 
