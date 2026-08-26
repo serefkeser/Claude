@@ -147,7 +147,9 @@ function parseCandidate(candidate: string) {
 
 function scriptScore(value: JsonObject) {
   let score = Object.keys(value).length;
-  if (Array.isArray(value.videoSlides)) score += 100 + value.videoSlides.length * 5;
+  if (Array.isArray(value.videoSlides) && value.videoSlides.length > 0) {
+    score += 100 + value.videoSlides.length * 5;
+  }
   if (Array.isArray(value.gazeteBasliklari)) score += 100 + value.gazeteBasliklari.length * 8;
   if (typeof value.thumbnailText === 'string') score += 10;
   if (typeof value.sonSoz === 'string') score += 10;
