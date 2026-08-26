@@ -73,12 +73,13 @@ describe('buildRenderStoryboard', () => {
     });
     const finalScene = scenes.at(-2);
     expect(finalScene?.kind).toBe('final');
-    expect(finalScene?.spokenText).toMatch(/— (Mustafa Kemal Atatürk|Sokrates|René Descartes|Francis Bacon|Yunus Emre|Epiktetos|Türk atasözü)/);
+    expect(finalScene?.spokenText).toMatch(/— (Mustafa Kemal Atatürk|Sokrates|René Descartes|Francis Bacon|Yunus Emre|Epiktetos)/);
     expect(scenes.at(-1)?.spokenText).toContain('Abone olmayı');
   });
 
   it('Son Söz havuzu sabit tek cümleye bağlı değildir', () => {
-    expect(TURKISH_FINAL_WORDS.length).toBeGreaterThanOrEqual(12);
+    expect(TURKISH_FINAL_WORDS.length).toBeGreaterThanOrEqual(8);
+    expect(TURKISH_FINAL_WORDS.every(item => item.author !== 'Türk atasözü')).toBe(true);
     const first = selectRotatingFinalWord('seed-a');
     const second = selectRotatingFinalWord('seed-b');
     expect(first).toMatch(/—/);

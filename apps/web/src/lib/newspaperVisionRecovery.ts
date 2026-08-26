@@ -181,7 +181,6 @@ export function recoverNewspaperCandidatesFromVision(options: {
     });
 
   const ordered: Array<VerifiedNewspaperCandidate & { recovered: boolean }> = [];
-  const rejectedLocalCandidateIds = new Set<string>();
   for (const proposal of proposals) {
     const headline = normalizeVisibleText(proposal.baslik);
     if (!headline || ordered.some(candidate => isDuplicateHeadline(candidate.text, headline))) continue;
@@ -195,22 +194,10 @@ export function recoverNewspaperCandidatesFromVision(options: {
           detail: normalizeVisibleText(proposal.aciklama),
           recovered: false,
         });
-        continue;
-      }
-
-      const localAsProposal: VisionNewspaperCandidate = {
-        baslik: localMatch.text,
-        aciklama: localMatch.detail,
-        localCropEvidence: proposal.localCropEvidence,
-      };
-      const localReason = validateVisionCandidate(localAsProposal, '', true);
-      if (!localReason) {
-        ordered.push({ ...localMatch, recovered: false });
       } else {
-        rejectedLocalCandidateIds.add(localMatch.id);
         rejected.push({
           headline,
-          reason: 'aynı haber kutusunda güvenilir cümle mutabakatı yok: ' + correctionReason + ' / ' + localReason,
+          reason: 'aynı haber kutusunda bağımsız OCR + görsel metin mutabakatı yok: ' + correctionReason,
         });
       }
       continue;
@@ -238,13 +225,8 @@ export function recoverNewspaperCandidatesFromVision(options: {
     });
   }
 
-  for (const candidate of options.localCandidates) {
-    if (!rejectedLocalCandidateIds.has(candidate.id)
-      && !ordered.some(existing => isDuplicateHeadline(existing.text, candidate.text))) {
-      ordered.push({ ...candidate, recovered: false });
-    }
-  }
-
+  // Fail-closed: Vision ile aynı haber kutusunda doğrulanmayan yerel OCR adayı
+  // asla sonradan fallback olarak geri eklenmez. Yanlış okumaktansa haber atlanır.
   const selected = ordered.slice(0, options.maximumStories);
   return {
     candidates: selected.map((candidate, index) => ({

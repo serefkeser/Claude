@@ -67,7 +67,7 @@ function selectPublishableCandidates(candidates: VerifiedNewspaperCandidate[]) {
 
 function buildEditorialEvidence(candidates: VerifiedNewspaperCandidate[]) {
   return candidates
-    .flatMap(candidate => [candidate.text, candidate.detail])
+    .map(candidate => candidate.text)
     .map(normalize)
     .filter(Boolean)
     .join(' ');

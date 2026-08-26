@@ -173,7 +173,40 @@ describe('newspaper full-vision recovery', () => {
       localOcrText: fullOcrText,
       maximumStories: 9,
     });
-    expect(result.candidates[0].detail).toBe(local.detail);
+    expect(result.candidates).toHaveLength(0);
+  });
+
+  it('Cumhuriyet örneğindeki SÜYÜK ve MN aylık gibi ham OCR bozulmalarını asla seslendirme adayına sokmaz', () => {
+    const result = recoverNewspaperCandidatesFromVision({
+      localCandidates: [{
+        id: 'H1',
+        text: 'Tarihin akışı değişti',
+        detail: "SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+        confidence: 88, score: 12000, x: 10, y: 20, w: 900, h: 140,
+      }],
+      visionCandidates: [{
+        baslik: 'Tarihin akışı değişti',
+        aciklama: "Büyük Atatürk'ün başkomutanlığında Türk ordusu, Sakarya Zaferi'nin ardından 11 aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başladı.",
+        localCropEvidence: "Tarihin akışı değişti SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+      }],
+      localOcrText: "OCR TAM METİN: Tarihin akışı değişti SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+      maximumStories: 9,
+    });
+    expect(result.candidates).toHaveLength(0);
+  });
+
+  it('Vision ile eşleşmeyen ham yerel OCR adayını fallback olarak geri eklemez', () => {
+    const result = recoverNewspaperCandidatesFromVision({
+      localCandidates: [{
+        id: 'H1', text: 'Tarihin akışı değişti',
+        detail: "SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+        confidence: 88, score: 12000, x: 10, y: 20, w: 900, h: 140,
+      }],
+      visionCandidates: [],
+      localOcrText: "OCR TAM METİN: Tarihin akışı değişti SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla 26 Ağustos 1922'de Büyük Taarruz'a başlandı.",
+      maximumStories: 9,
+    });
+    expect(result.candidates).toHaveLength(0);
   });
 
   it('aynı haber kutusundan yakın OCR yoksa AI metniyle kelime düzeltmez', () => {

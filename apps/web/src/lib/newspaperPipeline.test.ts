@@ -86,6 +86,17 @@ describe('locked newspaper pipeline', () => {
     expect(result.thumbnailText).toBe('SARAY ŞANSLI MÜTEAHHİTLER!');
   });
 
+  it('bozuk açıklama kelimesini clickbait kapağına taşımaz', () => {
+    const corrupted = stories.map((story, index) => index === 0
+      ? { ...story, detail: "SÜYÜK Atatürk'ün ardından MN aylık hazırlıkla gelişmeler yaşandı." }
+      : story);
+    const script = aiScript();
+    script.thumbnailText = 'Tarihin SÜYÜK akışı';
+    const result = buildLockedNewspaperScript({ script, candidates: corrupted, configuredSourceName: 'Cumhuriyet' });
+    expect(result.thumbnailText).not.toContain('SÜYÜK');
+    expect(result.thumbnailText).not.toContain('MN');
+  });
+
   it('kaynakta bulunmayan ideolojik etiketli clickbait reddedilir', () => {
     const script = aiScript();
     script.thumbnailText = 'Solcu gazete öfkeli';

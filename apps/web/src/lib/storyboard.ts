@@ -54,18 +54,10 @@ export const TURKISH_FINAL_WORDS: FinalWordEntry[] = [
   { id: 'bacon-bilgi', text: 'Bilgi güçtür.', author: 'Francis Bacon' },
   { id: 'yunus-ilim', text: 'İlim ilim bilmektir, ilim kendin bilmektir.', author: 'Yunus Emre' },
   { id: 'epiktetos-yargi', text: 'Bizi üzen şeyler değil, onlar hakkındaki yargılarımızdır.', author: 'Epiktetos' },
-  { id: 'atasozu-akil', text: 'Akıl akıldan üstündür.', author: 'Türk atasözü' },
-  { id: 'atasozu-birlik', text: 'Birlikten kuvvet doğar.', author: 'Türk atasözü' },
-  { id: 'atasozu-demir', text: 'İşleyen demir ışıldar.', author: 'Türk atasözü' },
-  { id: 'atasozu-damlaya', text: 'Damlaya damlaya göl olur.', author: 'Türk atasözü' },
-  { id: 'atasozu-neekersen', text: 'Ne ekersen onu biçersin.', author: 'Türk atasözü' },
-  { id: 'atasozu-dost', text: 'Dost acı söyler.', author: 'Türk atasözü' },
-  { id: 'atasozu-acele', text: 'Acele işe şeytan karışır.', author: 'Türk atasözü' },
-  { id: 'atasozu-sakla', text: 'Sakla samanı, gelir zamanı.', author: 'Türk atasözü' },
 ];
 
 const FINAL_WORD_HISTORY_KEY = 'otonom_final_word_history_v1';
-const FINAL_WORD_HISTORY_LIMIT = 10;
+const FINAL_WORD_HISTORY_LIMIT = 7;
 
 export const OUTRO_TEXTS: Record<string, string[]> = {
   tr: ['Abone olmayı,', 'beğenmeyi ve', 'paylaşmayı', 'ihmal etmeyin.'],
