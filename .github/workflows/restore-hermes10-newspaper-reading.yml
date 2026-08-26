@@ -1,0 +1,48 @@
+name: Restore Hermes 10 Newspaper Reading
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/restore-hermes10-newspaper-reading.mjs
+      - .github/workflows/restore-hermes10-newspaper-reading.yml
+
+permissions:
+  contents: write
+
+jobs:
+  restore-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - name: Restore Hermes 10 newspaper reader
+        run: node scripts/restore-hermes10-newspaper-reading.mjs
+      - name: Bump OTONOM patch version
+        run: node scripts/bump-patch-version.mjs
+      - name: Check version consistency
+        run: node scripts/check-version-consistency.mjs
+      - name: Run newspaper regression tests
+        run: npm exec vitest -- run services/api-gateway/src/routes/ai-newspaper.test.ts apps/web/src/lib/newspaperPipeline.test.ts apps/web/src/lib/storyboard.test.ts
+      - name: Run full Vitest suite
+        run: npm test
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=apps/web
+      - name: Typecheck and test API gateway
+        run: npm run typecheck --workspace=services/api-gateway && npm run test --workspace=services/api-gateway
+      - name: Build web app
+        run: npm run build:web
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+      - name: Commit tested restore
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/src/lib/aiClient.ts services/api-gateway/src/routes/ai.ts services/api-gateway/src/routes/ai-newspaper.test.ts services/api-gateway/src/ai/promptBuilder.ts package.json package-lock.json apps/web/package.json apps/web/src/version.ts packages/shared-config/package.json packages/shared-types/package.json packages/shared-utils/package.json services/api-gateway/package.json services/api-gateway/src/index.ts services/api-gateway/src/routes/health.ts services/media-storage/package.json services/video-renderer/package.json services/video-renderer/src/index.ts
+          git commit -m "fix: restore Hermes 10 newspaper vision reader"
+          git push
