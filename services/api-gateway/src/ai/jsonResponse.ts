@@ -59,8 +59,8 @@ function removeTrailingCommas(text: string) {
   return result;
 }
 
-function extractBalancedObjects(text: string) {
-  const objects: string[] = [];
+function extractBalancedStructures(text: string, open: '{' | '[', close: '}' | ']') {
+  const structures: string[] = [];
   let start = -1;
   let depth = 0;
   let inString = false;
@@ -69,7 +69,7 @@ function extractBalancedObjects(text: string) {
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
     if (start < 0) {
-      if (character === '{') {
+      if (character === open) {
         start = index;
         depth = 1;
       }
@@ -86,15 +86,23 @@ function extractBalancedObjects(text: string) {
       inString = true;
       continue;
     }
-    if (character === '{') depth += 1;
-    if (character === '}') depth -= 1;
+    if (character === open) depth += 1;
+    if (character === close) depth -= 1;
     if (depth === 0) {
-      objects.push(text.slice(start, index + 1));
+      structures.push(text.slice(start, index + 1));
       start = -1;
     }
   }
 
-  return objects;
+  return structures;
+}
+
+function extractBalancedObjects(text: string) {
+  return extractBalancedStructures(text, '{', '}');
+}
+
+function extractBalancedArrays(text: string) {
+  return extractBalancedStructures(text, '[', ']');
 }
 
 function unwrapKnownEnvelope(value: unknown): JsonObject | null {
@@ -222,8 +230,11 @@ export function parseAiJsonObject(text: string) {
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
-  const candidates = [withoutOuterFence, ...extractBalancedObjects(clean)]
-    .filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
+  const candidates = [
+    withoutOuterFence,
+    ...extractBalancedObjects(clean),
+    ...extractBalancedArrays(clean),
+  ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
 
   let best: JsonObject | null = null;
   let bestScore = -1;
