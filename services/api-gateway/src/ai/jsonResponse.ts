@@ -143,6 +143,42 @@ function salvageTruncatedScript(text: string): JsonObject | null {
   };
 }
 
+function salvageTruncatedNewspaper(text: string): JsonObject | null {
+  const headlinesKey = text.search(/"gazeteBasliklari"\s*:/i);
+  if (headlinesKey < 0) return null;
+  const arrayStart = text.indexOf('[', headlinesKey);
+  if (arrayStart < 0) return null;
+
+  const headlines = extractBalancedObjects(text.slice(arrayStart + 1))
+    .map(candidate => parseCandidate(candidate))
+    .filter((candidate): candidate is JsonObject => Boolean(
+      candidate
+      && typeof candidate.baslik === 'string'
+      && candidate.baslik.trim()
+      && typeof candidate.aciklama === 'string'
+      && candidate.aciklama.trim(),
+    ));
+  if (!headlines.length) return null;
+
+  const thumbnail = extractStringField(text, 'thumbnailText')
+    || String(headlines[0].baslik || 'GÜNDEM')
+      .split(/\s+/)
+      .slice(0, 4)
+      .join(' ')
+      .toLocaleUpperCase('tr-TR');
+
+  return {
+    isContentUnreadable: /"isContentUnreadable"\s*:\s*true/i.test(text),
+    videoSlides: [],
+    thumbnailText: thumbnail,
+    sonSoz: extractStringField(text, 'sonSoz'),
+    gununSorusu: extractStringField(text, 'gununSorusu'),
+    lastQuote: extractStringField(text, 'lastQuote'),
+    sourceName: extractStringField(text, 'sourceName'),
+    gazeteBasliklari: headlines,
+  };
+}
+
 export function parseAiJsonObject(text: string) {
   const clean = String(text || '')
     .replace(/^\uFEFF/, '')
@@ -167,6 +203,13 @@ export function parseAiJsonObject(text: string) {
       bestScore = score;
     }
   }
+
+  const salvagedNewspaper = salvageTruncatedNewspaper(clean);
+  const bestHeadlineCount = Array.isArray(best?.gazeteBasliklari) ? best.gazeteBasliklari.length : 0;
+  const salvagedHeadlineCount = Array.isArray(salvagedNewspaper?.gazeteBasliklari)
+    ? salvagedNewspaper.gazeteBasliklari.length
+    : 0;
+  if (salvagedNewspaper && (!best || salvagedHeadlineCount > bestHeadlineCount)) best = salvagedNewspaper;
 
   const salvaged = salvageTruncatedScript(clean);
   const bestSlideCount = Array.isArray(best?.videoSlides) ? best.videoSlides.length : 0;
