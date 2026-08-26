@@ -1,0 +1,36 @@
+name: Fix Strict Newspaper Proof 3.14.38
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/fix-strict-newspaper-proof-31438.mjs
+      - .github/workflows/fix-strict-newspaper-proof-31438.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - name: Apply strict proof fix
+        run: node scripts/fix-strict-newspaper-proof-31438.mjs
+      - name: Verify version
+        run: node scripts/check-version-consistency.mjs
+      - name: Run focused tests
+        run: npm exec vitest -- run apps/web/src/lib/newspaperVisionRecovery.test.ts apps/web/src/lib/newspaperCopy.test.ts apps/web/src/lib/newspaperPipeline.test.ts
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/src/lib/newspaperVisionRecovery.ts apps/web/src/lib/newspaperVisionRecovery.test.ts package.json package-lock.json apps/web/package.json apps/web/src/version.ts packages/shared-config/package.json packages/shared-types/package.json packages/shared-utils/package.json services/api-gateway/package.json services/api-gateway/src/index.ts services/api-gateway/src/routes/health.ts services/media-storage/package.json services/video-renderer/package.json services/video-renderer/src/index.ts
+          git commit -m "fix: require same-box OCR proof before narration"
+          git push
