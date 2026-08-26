@@ -335,7 +335,7 @@ function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRe
 async function callOpenAiCompatible(
   provider: ProviderDefinition,
   request: AiGenerationRequest,
-  options: { openRouterPlainJson?: boolean } = {},
+  options: { plainJsonTransport?: boolean } = {},
 ): Promise<string> {
   const body: Record<string, unknown> = {
     model: provider.model,
@@ -348,23 +348,26 @@ async function callOpenAiCompatible(
     stream: false,
   };
 
-  if (request.responseFormat === 'json' && provider.jsonMode) {
+  if (provider.name === 'groq' && request.task === 'vision' && request.responseFormat === 'json') {
+    body.reasoning_effort = 'none';
+    body.include_reasoning = false;
+  }
+
+  if (request.responseFormat === 'json' && provider.jsonMode && !options.plainJsonTransport) {
     if (provider.name === 'openrouter') {
-      if (!options.openRouterPlainJson) {
-        const schemaName = request.responseSchema === 'newspaper'
-          ? 'otonom_newspaper'
-          : 'otonom_script';
-        body.response_format = {
-          type: 'json_schema',
-          json_schema: {
-            name: schemaName,
-            strict: true,
-            schema: toOpenRouterJsonSchema(selectedResponseSchema(request)),
-          },
-        };
-        body.provider = { require_parameters: true, allow_fallbacks: true };
-        body.plugins = [{ id: 'response-healing' }];
-      }
+      const schemaName = request.responseSchema === 'newspaper'
+        ? 'otonom_newspaper'
+        : 'otonom_script';
+      body.response_format = {
+        type: 'json_schema',
+        json_schema: {
+          name: schemaName,
+          strict: true,
+          schema: toOpenRouterJsonSchema(selectedResponseSchema(request)),
+        },
+      };
+      body.provider = { require_parameters: true, allow_fallbacks: true };
+      body.plugins = [{ id: 'response-healing' }];
     } else {
       body.response_format = { type: 'json_object' };
     }
@@ -490,7 +493,7 @@ export async function generateWithFallback(
   const attempts: AiProviderAttempt[] = [];
   for (const provider of providers) {
     const providerCalls = provider.name === 'gemini'
-      || (provider.name === 'openrouter' && request.responseFormat === 'json')
+      || ((provider.name === 'openrouter' || provider.name === 'groq') && request.responseFormat === 'json')
       ? 2
       : 1;
 
@@ -499,13 +502,14 @@ export async function generateWithFallback(
         const text = provider.name === 'gemini'
           ? await callGemini(provider, request, callIndex === 1)
           : await callOpenAiCompatible(provider, request, {
-            openRouterPlainJson: provider.name === 'openrouter' && callIndex === 1,
+            plainJsonTransport: (provider.name === 'openrouter' || provider.name === 'groq') && callIndex === 1,
           });
         request.validateResponse?.(text);
         attempts.push({ provider: provider.name, model: provider.model, ok: true });
         return { provider: provider.name, model: provider.model, text, attempts };
       } catch (error) {
         const status = errorStatus(error);
+        const reason = errorReason(error);
         const retryGemini = provider.name === 'gemini'
           && callIndex === 0
           && request.responseFormat === 'json'
@@ -513,11 +517,15 @@ export async function generateWithFallback(
             (typeof status === 'number' && GEMINI_TRANSIENT_STATUSES.has(status))
             || status === undefined
           );
+        const retryGroq = provider.name === 'groq'
+          && callIndex === 0
+          && request.responseFormat === 'json'
+          && status === 400
+          && /json_validate_failed|failed to validate json/i.test(reason);
         const retryOpenRouter = provider.name === 'openrouter'
           && callIndex === 0
           && request.responseFormat === 'json'
           && (status === 400 || status === undefined);
-        const reason = errorReason(error);
 
         attempts.push({
           provider: provider.name,
@@ -526,15 +534,18 @@ export async function generateWithFallback(
           status,
           reason: retryGemini
             ? `${reason} · Gemini JSON yanıtı bir kez yeniden deneniyor.`
-            : retryOpenRouter
-              ? `${reason} · OpenRouter structured JSON reddedildi; taşıma şeması olmadan yeniden deneniyor, içerik doğrulaması korunuyor.`
-              : reason,
+            : retryGroq
+              ? `${reason} · Groq JSON doğrulaması reddedildi; response_format olmadan bir kez yeniden deneniyor, içerik doğrulaması korunuyor.`
+              : retryOpenRouter
+                ? `${reason} · OpenRouter structured JSON reddedildi; taşıma şeması olmadan yeniden deneniyor, içerik doğrulaması korunuyor.`
+                : reason,
         });
 
         if (retryGemini) {
           await sleep(GEMINI_RETRY_DELAY_MS);
           continue;
         }
+        if (retryGroq) continue;
         if (retryOpenRouter) continue;
         break;
       }

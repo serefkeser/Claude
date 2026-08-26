@@ -224,6 +224,56 @@ describe('AI provider fallback', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('api.groq.com');
   });
 
+  it('Groq Vision json_validate_failed 400 verirse reasoning kapalı biçimde response_format olmadan bir kez yeniden dener', async () => {
+    const valid = '{"isContentUnreadable":false,"gazeteBasliklari":[{"baslik":"Birinci gerçek haber","aciklama":"Gazetede basılı gerçek açıklama cümlesi.","onem":100,"x":1,"y":1,"w":40,"h":10}]}';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          message: 'Failed to validate JSON. Please adjust your prompt.',
+          type: 'invalid_request_error',
+          code: 'json_validate_failed',
+          failed_generation: '',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: valid } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GROQ_API_KEY: 'groq-test',
+      AI_VISION_PROVIDER_ORDER: 'groq',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+      validateResponse: text => {
+        const parsed = JSON.parse(text) as { gazeteBasliklari?: unknown[] };
+        if (!Array.isArray(parsed.gazeteBasliklari)) throw new Error('gazete JSON doğrulanamadı');
+      },
+    });
+
+    expect(result.provider).toBe('groq');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      provider: 'groq',
+      status: 400,
+      reason: expect.stringContaining('response_format olmadan bir kez yeniden deneniyor'),
+    }));
+
+    const firstBody = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as Record<string, any>;
+    expect(firstBody.response_format).toEqual({ type: 'json_object' });
+    expect(firstBody.reasoning_effort).toBe('none');
+    expect(firstBody.include_reasoning).toBe(false);
+
+    const secondBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)) as Record<string, any>;
+    expect(secondBody).not.toHaveProperty('response_format');
+    expect(secondBody.reasoning_effort).toBe('none');
+    expect(secondBody.include_reasoning).toBe(false);
+  });
+
   it('görsel görevinde metin-only OpenCode sağlayıcısını çağırmaz', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"videoSlides":[]}' } }],
