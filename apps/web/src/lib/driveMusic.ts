@@ -4,16 +4,23 @@ import { fetchWithNetworkRetry } from './networkRetry';
 
 const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
-interface DriveMusicCatalog {
+export interface DriveMusicTrack {
+  id: string;
+  name: string;
+  mimeType: string;
+  url: string;
+}
+
+interface DriveMusicCatalogResponse {
   success: boolean;
   data?: {
     folderId: string;
-    tracks: Array<{ id: string; name: string; mimeType: string; url: string }>;
+    tracks: DriveMusicTrack[];
   };
   error?: { message?: string };
 }
 
-let activeAutomaticUrl: string | null = null;
+let activeDriveUrl: string | null = null;
 
 function chooseTrack<T>(tracks: T[]) {
   if (!tracks.length) return null;
@@ -22,35 +29,49 @@ function chooseTrack<T>(tracks: T[]) {
   return tracks[random[0] % tracks.length];
 }
 
-export async function loadAutomaticDriveMusic(): Promise<MediaFile> {
-  const catalogResponse = await fetchWithNetworkRetry(`${API_BASE}/music/catalog`, {}, {
+export async function loadDriveMusicCatalog(): Promise<DriveMusicTrack[]> {
+  const response = await fetchWithNetworkRetry(`${API_BASE}/music/catalog`, { cache: 'no-store' }, {
     endpoint: '/music/catalog',
   });
-  const catalog = await catalogResponse.json().catch(() => null) as DriveMusicCatalog | null;
-  if (!catalogResponse.ok || !catalog?.success || !catalog.data?.tracks.length) {
-    throw new Error(catalog?.error?.message || `Google Drive müzik kataloğu alınamadı (HTTP ${catalogResponse.status}).`);
+  const catalog = await response.json().catch(() => null) as DriveMusicCatalogResponse | null;
+
+  if (!response.ok || !catalog?.success || !catalog.data?.tracks.length) {
+    throw new Error(catalog?.error?.message || `Google Drive müzik kataloğu alınamadı (HTTP ${response.status}).`);
   }
 
-  const selected = chooseTrack(catalog.data.tracks);
-  if (!selected) throw new Error('Google Drive klasöründe kullanılabilir haber müziği bulunamadı.');
-  writeSystemLog(`Google Drive müziği seçildi: ${selected.name}`);
+  return catalog.data.tracks;
+}
 
-  const audioResponse = await fetchWithNetworkRetry(selected.url, { cache: 'no-store' }, {
-    endpoint: `/music/${selected.id}`,
+export async function loadDriveMusicTrack(track: DriveMusicTrack): Promise<MediaFile> {
+  writeSystemLog(`Google Drive müziği seçildi: ${track.name}`);
+
+  const audioResponse = await fetchWithNetworkRetry(track.url, { cache: 'no-store' }, {
+    endpoint: `/music/${track.id}`,
   });
   if (!audioResponse.ok) throw new Error(`Google Drive müziği indirilemedi (HTTP ${audioResponse.status}).`);
-  const blob = await audioResponse.blob();
-  if (!blob.size || !blob.type.startsWith('audio/')) throw new Error('Google Drive yanıtı geçerli bir ses dosyası değil.');
 
-  if (activeAutomaticUrl) URL.revokeObjectURL(activeAutomaticUrl);
-  activeAutomaticUrl = URL.createObjectURL(blob);
-  writeSystemLog(`Google Drive müziği hazır: ${selected.name} · ${(blob.size / 1024 / 1024).toFixed(1)} MB`, 'success');
+  const blob = await audioResponse.blob();
+  if (!blob.size || !blob.type.startsWith('audio/')) {
+    throw new Error('Google Drive yanıtı geçerli bir ses dosyası değil.');
+  }
+
+  if (activeDriveUrl) URL.revokeObjectURL(activeDriveUrl);
+  activeDriveUrl = URL.createObjectURL(blob);
+
+  writeSystemLog(`Google Drive müziği hazır: ${track.name} · ${(blob.size / 1024 / 1024).toFixed(1)} MB`, 'success');
   return {
-    id: `drive-${selected.id}`,
-    name: selected.name,
+    id: `drive-${track.id}`,
+    name: track.name,
     type: 'audio',
-    mimeType: blob.type || selected.mimeType || 'audio/mpeg',
+    mimeType: blob.type || track.mimeType || 'audio/mpeg',
     size: blob.size,
-    url: activeAutomaticUrl,
+    url: activeDriveUrl,
   };
+}
+
+export async function loadAutomaticDriveMusic(): Promise<MediaFile> {
+  const tracks = await loadDriveMusicCatalog();
+  const selected = chooseTrack(tracks);
+  if (!selected) throw new Error('Google Drive klasöründe kullanılabilir haber müziği bulunamadı.');
+  return loadDriveMusicTrack(selected);
 }
