@@ -537,6 +537,35 @@ async function extractTextLocally(media: MediaFile, configuredSourceName = '') {
   }
 }
 
+export function computeNewspaperEvidenceCrop(options: {
+  imageWidth: number;
+  imageHeight: number;
+  boxLeft: number;
+  boxTop: number;
+  boxWidth: number;
+  boxHeight: number;
+}) {
+  const { imageWidth, imageHeight, boxLeft, boxTop, boxWidth, boxHeight } = options;
+  const padX = Math.max(4, boxWidth * 0.04);
+  const padTop = Math.max(3, boxHeight * 0.05);
+  // Vision kutuları çoğunlukla yalnız başlığı kapsar. Açıklama birkaç satır aşağıda
+  // olduğu için başlık yüksekliğinin 3 katına kadar kontrollü dikey bağlam al.
+  // Yatay sınır aynı haber sütununda kalır; böylece komşu haberler gereksiz yere karışmaz.
+  const contextHeight = Math.max(boxHeight * 3.2, imageHeight * 0.075);
+  const maximumContextHeight = Math.min(imageHeight * 0.30, Math.max(boxHeight * 4.5, imageHeight * 0.11));
+  const evidenceHeight = Math.min(contextHeight, maximumContextHeight);
+  const left = Math.max(0, Math.floor(boxLeft - padX));
+  const top = Math.max(0, Math.floor(boxTop - padTop));
+  const right = Math.min(imageWidth, Math.ceil(boxLeft + boxWidth + padX));
+  const bottom = Math.min(imageHeight, Math.ceil(boxTop + evidenceHeight));
+  return {
+    left,
+    top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
 async function addLocalCropEvidenceToVisionCandidates(
   media: MediaFile,
   candidates: VisionNewspaperCandidate[],
@@ -580,20 +609,16 @@ async function addLocalCropEvidenceToVisionCandidates(
         const boxTop = y / 100 * imageHeight;
         const boxWidth = widthPercent / 100 * imageWidth;
         const boxHeight = heightPercent / 100 * imageHeight;
-        const padX = Math.max(4, boxWidth * 0.04);
-        const padTop = Math.max(3, boxHeight * 0.04);
-        const padBottom = Math.max(6, boxHeight * 0.12);
-        const left = Math.max(0, Math.floor(boxLeft - padX));
-        const top = Math.max(0, Math.floor(boxTop - padTop));
-        const right = Math.min(imageWidth, Math.ceil(boxLeft + boxWidth + padX));
-        const bottom = Math.min(imageHeight, Math.ceil(boxTop + boxHeight + padBottom));
+        const evidenceRectangle = computeNewspaperEvidenceCrop({
+          imageWidth,
+          imageHeight,
+          boxLeft,
+          boxTop,
+          boxWidth,
+          boxHeight,
+        });
         const recognition = await worker.recognize(image, {
-          rectangle: {
-            left,
-            top,
-            width: Math.max(1, right - left),
-            height: Math.max(1, bottom - top),
-          },
+          rectangle: evidenceRectangle,
         }, { text: true });
         const localCropEvidence = recognition.data.text.replace(/\s+/g, ' ').trim();
         enriched.push({ ...candidate, localCropEvidence });
