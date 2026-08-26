@@ -42,11 +42,39 @@ function analysisInstruction(mode = 'yorumsuz') {
   return 'Yalnız haberi tarafsız ve yorumsuz anlat; 5N1K kurallarını uygula.';
 }
 
-export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
+function newspaperSystemPrompt(language: string) {
+  return `Sen OTONOM gazete ilk sayfa okuma motorusun.
+Çıktının tamamı geçerli JSON olmalı; Markdown, açıklama, düşünce metni veya kod bloğu kullanma.
+Dil: ${language}.
+
+GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI:
+1. Gönderilen görseller AYNI gazete sayfasının tam görünümü ve örtüşen yakın planları olabilir. Bunları tek sayfa olarak birlikte değerlendir. Yakın planda tekrar görülen aynı haberi yalnız bir kez say.
+2. Ana veri kaynağın yalnız yüklenen gazete görselleridir. Kullanıcı metni gazetedeki metnin yerine geçmez.
+3. Görseldeki gerçek haber başlıklarından en az 5, en fazla 9 FARKLI haber seç. Büyük ana manşetten daha küçük haber kutularına doğru sırala.
+4. Her haber için yalnız baslik, aciklama, onem, x, y, w, h üret.
+5. baslik gazetede basılı gerçek başlık olmalı. Özetleme, yeniden yazma, dilbilgisi düzeltmesi yapma ve yeni kelime uydurma.
+6. aciklama yalnız o başlığın hemen altında veya yanında fiziksel olarak bağlı spot/açıklamadan 1-2 tam cümle olmalı. Başka haber metnini karıştırma.
+7. Sayı, tarih, yüzde, para, kişi, kurum ve yer adlarını gördüğün biçimde koru. Emin olmadığın haberi atla.
+8. Reklam, ilan, bulmaca, masthead/logo, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
+9. Koordinatlar tam sayfa için sol üst 0,0; sağ alt 100,100 olacak şekilde yüzde cinsinden yaklaşık x/y/w/h değerleridir. Yakın plan kullanarak okusan bile koordinatı tam sayfaya göre yaklaşıkla.
+10. thumbnailText 3-4 kelimelik clickbait olmalı ve yalnız gazetenin gerçek başlık/spot dilindeki vurguya dayanmalı.
+11. En az 5 gerçek başlık+açıklama okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için tahmin üretme.
+12. Başlık ve açıklama dışında video sahnesi, son söz, soru veya kapanış üretme; bunları istemci oluşturacak.
+
+Yalnız şu JSON yapısını döndür:
+{
+  "isContentUnreadable": boolean,
+  "sourceName": string,
+  "thumbnailText": string,
+  "gazeteBasliklari": [
+    {"baslik": string, "aciklama": string, "onem": number, "x": number, "y": number, "w": number, "h": number}
+  ]
+}`;
+}
+
+function standardSystemPrompt(language: string, input: AnalyzeInput) {
   const config = input.config || {};
-  const isGazete = input.inputType === 'gazete';
-  const language = config.language || 'tr';
-  const system = `Sen OTONOM için dikey kısa haber videosu editörüsün.
+  return `Sen OTONOM için dikey kısa haber videosu editörüsün.
 Çıktının tamamı geçerli JSON olmalı; Markdown kod bloğu kullanma.
 Dil: ${language}.
 Hedef: ${durationInstruction(config.duration)}.
@@ -57,23 +85,9 @@ Okuyamadığın veya doğrulayamadığın içeriği UYDURMA.
 Yayın güvenliği zorunludur: tehdit veya şiddete çağrı, nefret/ayrımcılık, hedef gösterme, hakaret, kişisel veri, çocukların cinsel istismarı, kendine zarar vermeyi teşvik, suç işlemeyi kolaylaştıran talimat, mucize tedavi ya da garantili kazanç vaadi üretme.
 Bir kişiyi kesinleşmiş mahkeme kararı olmadan suçlu ilan etme. Kaynaktaki hukuki statüyü değiştirme.
 Telefon, e-posta, T.C. kimlik numarası, IBAN veya özel adresi yayın metnine taşıma.
-sonSoz alanı kısa bir özlü söz olabilir; istemci gazete modunda kendi doğrulanmış alıntı havuzunu kullanabilir.
+sonSoz alanı kısa bir özlü söz olabilir.
 gununSorusu alanı tarafsız tek cümlelik soru olmalı.
 lastQuote kısa kapanış cümlesi olmalı.
-${isGazete ? `
-GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI (KRİTİK):
-1. Ana veri kaynağın yüklenen GAZETE GÖRSELİNİN KENDİSİDİR. Başlık ve açıklamaları doğrudan görüntüden oku. Kullanıcı metnindeki OCR benzeri satırları gazetedeki metnin yerine koyma.
-2. Görseldeki gerçek haber başlıklarından en az 5, en fazla 9 FARKLI haber seç. Büyük ana manşetten daha küçük haber kutularına doğru sırala. Aynı haberi ikinci kez seçme.
-3. Her haber için gazeteBasliklari öğesi üret ve şu alanları doldur: sourceHeadlineId, baslik, aciklama, onem, x, y, w, h.
-4. baslik: Gazetede basılı gerçek başlık olmalı. Türkçe karakteri, özel ismi ve kelimeyi gördüğün biçimde yaz. Başlığı özetleme, yeniden yazma veya düzeltmeye çalışırken yeni kelime uydurma.
-5. aciklama: SADECE o başlığın hemen altında/yanında fiziksel olarak bağlı haber spotu veya açıklamasından 1-2 TAM cümle oku. Başka haberin paragrafını karıştırma. Gazetede olmayan bir cümle kurma.
-6. Sayı, tarih, yüzde, para, kişi, kurum ve yer adlarını görselde gördüğün biçimde koru. Emin olmadığın kelimeyi tahmin etmek yerine o haberi atla.
-7. Kalın siyah/kırmızı büyük başlıkları ve belirgin haber kutularını önceliklendir. Reklam, ilan, bulmaca, tarih, gazete logosu/masthead, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
-8. Koordinatlar gazete sayfasının sol üstü 0,0; sağ altı 100,100 olacak şekilde yüzde cinsinden x/y/w/h ver. Kutu mümkün olduğunca başlık ve ona bağlı açıklamayı kapsasın.
-9. Gazete modunda videoSlides alanını TAM OLARAK [] döndür. Sahne metnini burada tekrar etme. Her haberin özgün başlık+açıklaması istemcide gazeteBasliklari üzerinden tek sahneye dönüştürülecek ve orijinal gazete görseli kullanılacak.
-10. thumbnailText 3-4 kelimelik clickbait olmalı; gazetenin kendi başlık/spot dilindeki gerçek vurguya dayanmalı. Kaynakta olmayan siyasi/ideolojik etiket, suçlama, sonuç veya duygu ekleme.
-11. gazeteBasliklari ANA ÇIKTIDIR. Aynı başlık veya açıklamayı videoSlides, sonSoz, gununSorusu ya da lastQuote içinde tekrar ederek JSON'u büyütme.
-12. En az 5 gerçek haberin başlık+açıklamasını görselden okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için uydurma veya bozuk metin üretme.` : ''}
 
 JSON şeması:
 {
@@ -84,9 +98,17 @@ JSON şeması:
   "gununSorusu": string,
   "lastQuote": string,
   "sourceName": string,
-  "gazeteBasliklari": [{"sourceHeadlineId": string, "baslik": string, "aciklama": string, "onem": number, "x": number, "y": number, "w": number, "h": number}]
+  "gazeteBasliklari": []
+}`;
 }
-Gazete modunda şemadaki videoSlides değeri [] olmalıdır.`;
+
+export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
+  const config = input.config || {};
+  const isGazete = input.inputType === 'gazete';
+  const language = config.language || 'tr';
+  const system = isGazete
+    ? newspaperSystemPrompt(language)
+    : standardSystemPrompt(language, input);
 
   const parts: AiContentPart[] = [];
   const sourceText = input.text?.trim();
@@ -106,7 +128,9 @@ Gazete modunda şemadaki videoSlides değeri [] olmalıdır.`;
   }
   parts.push({
     type: 'text',
-    text: `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nİçerik türü: ${config.tip || 'haber'}\nVideo stili: ${config.videoStyle || 'cinematic'}\nEk kullanıcı yorumu: ${config.yorum || 'yok'}\nİçeriği analiz et ve yalnız şemaya uyan JSON döndür.`,
+    text: isGazete
+      ? `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nAynı gazete sayfasının görünümlerini birlikte incele, tekrarları birleştir ve yalnız gazete JSON yapısını döndür.`
+      : `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nİçerik türü: ${config.tip || 'haber'}\nVideo stili: ${config.videoStyle || 'cinematic'}\nEk kullanıcı yorumu: ${config.yorum || 'yok'}\nİçeriği analiz et ve yalnız şemaya uyan JSON döndür.`,
   });
 
   return [
