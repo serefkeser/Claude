@@ -48,7 +48,7 @@ function newspaperSystemPrompt(language: string) {
 Dil: ${language}.
 
 GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI:
-1. Gönderilen görseller AYNI gazete sayfasının tam görünümü ve örtüşen yakın planları olabilir. Bunları tek sayfa olarak birlikte değerlendir. Yakın planda tekrar görülen aynı haberi yalnız bir kez say.
+1. Gönderilen TEK görsel bir gazete kanıt kolajıdır: solda tam sayfa, sağ üstte üst yakın plan, sağ altta alt yakın plan vardır. Üç panel AYNI gazete sayfasına aittir; sağ paneller yalnız okuma desteğidir, ayrı sayfa değildir. Tekrar görülen aynı haberi yalnız bir kez say.
 2. Ana veri kaynağın yalnız yüklenen gazete görselleridir. Kullanıcı metni gazetedeki metnin yerine geçmez.
 3. Görseldeki gerçek haber başlıklarından en az 5, en fazla 9 FARKLI haber seç. Büyük ana manşetten daha küçük haber kutularına doğru sırala.
 4. Her haber için yalnız baslik, aciklama, onem, x, y, w, h üret.
@@ -56,7 +56,7 @@ GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI:
 6. aciklama yalnız o başlığın hemen altında veya yanında fiziksel olarak bağlı spot/açıklamadan 1-2 tam cümle olmalı. Başka haber metnini karıştırma.
 7. Sayı, tarih, yüzde, para, kişi, kurum ve yer adlarını gördüğün biçimde koru. Emin olmadığın haberi atla.
 8. Reklam, ilan, bulmaca, masthead/logo, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
-9. Koordinatlar tam sayfa için sol üst 0,0; sağ alt 100,100 olacak şekilde yüzde cinsinden yaklaşık x/y/w/h değerleridir. Yakın plan kullanarak okusan bile koordinatı tam sayfaya göre yaklaşıkla.
+9. Koordinatlar YALNIZ soldaki tam sayfa paneli için sol üst 0,0; sağ alt 100,100 olacak şekilde yüzde cinsinden yaklaşık x/y/w/h değerleridir. Sağdaki yakın planı kullanarak okusan bile koordinatı soldaki tam sayfaya göre yaklaşıkla.
 10. En az 5 gerçek başlık+açıklama okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için tahmin üretme.
 11. Başlık ve açıklama dışında video sahnesi, kapak metni, son söz, soru, kapanış veya ek alan üretme; bunları istemci doğrulanmış başlıklardan oluşturacak.
 
@@ -126,7 +126,7 @@ export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
   parts.push({
     type: 'text',
     text: isGazete
-      ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nAynı gazete sayfasının görünümlerini birlikte incele, tekrarları birleştir ve yalnız isContentUnreadable + gazeteBasliklari JSON yapısını döndür.`
+      ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nTek birleşik görselde soldaki tam sayfayı ve sağdaki iki yakın planı birlikte incele, tekrarları birleştir ve yalnız isContentUnreadable + gazeteBasliklari JSON yapısını döndür.`
       : `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nİçerik türü: ${config.tip || 'haber'}\nVideo stili: ${config.videoStyle || 'cinematic'}\nEk kullanıcı yorumu: ${config.yorum || 'yok'}\nİçeriği analiz et ve yalnız şemaya uyan JSON döndür.`,
   });
 

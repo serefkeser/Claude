@@ -369,7 +369,7 @@ export async function analyzeForVideo(options: {
   let images: AnalysisImage[] = [];
   if (options.inputType === 'gazete' && imageCandidates.length === 1 && imageCandidates[0].type === 'image') {
     images = await mediaToNewspaperVisionViews(imageCandidates[0]);
-    writeSystemLog('Gazete Vision hazırlığı: tam sayfa + üst yakın plan + alt yakın plan olmak üzere 3 görünüm hazırlandı.');
+    writeSystemLog('Gazete Vision hazırlığı: tam sayfa + üst/alt yakın plan tek birleşik JPEG içinde hazırlandı; sağlayıcıya yalnız 1 image gönderilecek.');
   } else {
     const settled = await Promise.allSettled(imageCandidates.map(media => mediaToAnalysisImage(
       media,
@@ -397,7 +397,7 @@ export async function analyzeForVideo(options: {
   };
 
   if (options.inputType === 'gazete') {
-    writeSystemLog('Hermes 10 gazete okuma modu: aynı sayfanın tam görünümü ve örtüşen yakın planları Vision modele gönderiliyor.');
+    writeSystemLog('Hermes 10 gazete okuma modu: aynı sayfanın tam görünümü ve iki yakın planı TEK Vision görseli olarak gönderiliyor.');
     writeSystemLog('Yerel Tesseract OCR gazete başlığını veya cümlesini değiştirmeyecek.');
   }
 
@@ -406,7 +406,7 @@ export async function analyzeForVideo(options: {
     text: [
       options.text.trim(),
       options.inputType === 'gazete'
-        ? 'GAZETE OKUMA: Gönderilen görseller aynı gazete sayfasının tam görünümü ve yakın planlarıdır. Tek bir sayfa gibi birlikte değerlendir; tekrar eden haberi bir kez say. Görseldeki gerçek haber başlıklarını ve onlara fiziksel olarak bağlı açıklamaları doğrudan görselden oku. Okuyamadığın kelimeyi uydurma.'
+        ? 'GAZETE OKUMA: Gönderilen TEK görsel bir kanıt kolajıdır. Soldaki panel tam gazete sayfasıdır; sağ üst ve sağ alt paneller aynı sayfanın yakın planlarıdır. Sağ panellerden okuduğun metni soldaki tam sayfadaki habere bağla; aynı haberi yalnız bir kez say. Koordinatları yalnız soldaki tam sayfaya göre 0-100 ver. Görseldeki gerçek haber başlıklarını ve onlara fiziksel olarak bağlı açıklamaları doğrudan görselden oku. Okuyamadığın kelimeyi uydurma.'
         : '',
     ].filter(Boolean).join('\n\n'),
     images,

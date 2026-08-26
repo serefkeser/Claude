@@ -89,10 +89,11 @@ interface ProviderDefinition {
 }
 
 const DEFAULT_TEXT_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'groq', 'opencode', 'nvidia'];
-const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'openrouter'];
+const DEFAULT_VISION_ORDER: AiProviderName[] = ['gemini', 'nvidia', 'openrouter'];
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_VISION_TIMEOUT_MS = 40_000;
 const OPENROUTER_VISION_TIMEOUT_MS = 55_000;
+const NVIDIA_VISION_TIMEOUT_MS = 55_000;
 const TTS_TIMEOUT_MS = 60_000;
 const GEMINI_RETRY_DELAY_MS = 750;
 const GEMINI_TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
@@ -234,6 +235,7 @@ function getProviderDefinitions(env: AiProviderEnv, task: AiTask) {
         : (env.NVIDIA_TEXT_MODEL || 'nvidia/nemotron-3-nano-30b-a3b'),
       supportsVision: true,
       jsonMode: false,
+      extraHeaders: { Accept: 'application/json' },
     } : undefined,
     opencode: env.OPENCODE_API_KEY ? {
       name: 'opencode',
@@ -323,6 +325,7 @@ function sleep(ms: number) {
 }
 
 function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRequest) {
+  if (request.task === 'vision' && provider.name === 'nvidia') return NVIDIA_VISION_TIMEOUT_MS;
   if (request.task === 'vision' && provider.name === 'openrouter') return OPENROUTER_VISION_TIMEOUT_MS;
   return PROVIDER_TIMEOUT_MS;
 }
@@ -357,7 +360,7 @@ async function callOpenAiCompatible(
             schema: toOpenRouterJsonSchema(selectedResponseSchema(request)),
           },
         };
-        body.provider = { require_parameters: true };
+        body.provider = { require_parameters: true, allow_fallbacks: true };
         body.plugins = [{ id: 'response-healing' }];
       }
     } else {
@@ -409,6 +412,7 @@ function toGeminiParts(content: AiMessage['content']) {
 async function callGemini(
   provider: ProviderDefinition,
   request: AiGenerationRequest,
+  retryHint = false,
 ): Promise<string> {
   const systemText = request.messages
     .filter(message => message.role === 'system')
@@ -422,6 +426,14 @@ async function callGemini(
       role: message.role === 'assistant' ? 'model' : 'user',
       parts: toGeminiParts(message.content),
     }));
+  if (retryHint && request.responseSchema === 'newspaper') {
+    contents.push({
+      role: 'user',
+      parts: [{
+        text: 'Önceki gazete yanıtı doğrulamayı geçmedi. Aynı TEK birleşik görseli yeniden incele. Soldaki tam sayfayı ana geometri kabul et; sağ üst ve sağ alt paneller yalnız aynı sayfanın yakın planıdır. Yalnız gerçekten okuyabildiğin başlık+açıklamaları JSON şemasında döndür; sayı tamamlamak için tahmin etme.',
+      }],
+    });
+  }
   const schema = selectedResponseSchema(request);
 
   return withRequestTimeout(async signal => {
@@ -483,7 +495,7 @@ export async function generateWithFallback(
     for (let callIndex = 0; callIndex < providerCalls; callIndex += 1) {
       try {
         const text = provider.name === 'gemini'
-          ? await callGemini(provider, request)
+          ? await callGemini(provider, request, callIndex === 1)
           : await callOpenAiCompatible(provider, request, {
             openRouterPlainJson: provider.name === 'openrouter' && callIndex === 1,
           });

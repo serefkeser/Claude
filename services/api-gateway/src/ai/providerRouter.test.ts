@@ -281,7 +281,7 @@ describe('AI provider fallback', () => {
     expect(body.response_format.json_schema.strict).toBe(true);
     expect(body.response_format.json_schema.schema.type).toBe('object');
     expect(body.response_format.json_schema.schema.additionalProperties).toBe(false);
-    expect(body.provider).toEqual({ require_parameters: true });
+    expect(body.provider).toEqual({ require_parameters: true, allow_fallbacks: true });
     expect(body.plugins).toEqual([{ id: 'response-healing' }]);
   });
 
