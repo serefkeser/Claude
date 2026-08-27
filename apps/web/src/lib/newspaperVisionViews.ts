@@ -30,16 +30,15 @@ export interface NewspaperVisionCompositeLayout {
 }
 
 const NEWSPAPER_VISION_VIEW_SPECS: NewspaperVisionViewSpec[] = [
-  { label: 'tam sayfa', topRatio: 0, heightRatio: 1, maxEdge: 2000, quality: 0.82 },
-  { label: 'üst yakın plan', topRatio: 0, heightRatio: 0.62, maxEdge: 2200, quality: 0.86 },
-  { label: 'alt yakın plan', topRatio: 0.38, heightRatio: 0.62, maxEdge: 2200, quality: 0.86 },
+  { label: 'tam sayfa', topRatio: 0, heightRatio: 1, maxEdge: 2600, quality: 0.9 },
 ];
 
 const COMPOSITE_WIDTH = 2200;
 const COMPOSITE_HEIGHT = 1900;
 const COMPOSITE_PADDING = 20;
 const COMPOSITE_GAP = 20;
-const COMPOSITE_JPEG_QUALITY = 0.84;
+const DISCOVERY_MAX_EDGE = 2600;
+const DISCOVERY_JPEG_QUALITY = 0.9;
 
 export function getNewspaperVisionViewSpecs() {
   return NEWSPAPER_VISION_VIEW_SPECS.map(spec => ({ ...spec }));
@@ -155,9 +154,35 @@ export async function prepareNewspaperVisionComposite(blob: Blob, sourceName: st
       drawCompositePanel(context, bitmap, panel);
     }
 
-    const rendered = await canvasToJpeg(canvas, COMPOSITE_JPEG_QUALITY);
+    const rendered = await canvasToJpeg(canvas, 0.84);
     return {
-      name: `${sourceName} · tek Vision görseli · solda tam sayfa · sağ üst/alt yakın plan`,
+      name: `${sourceName} · eski birleşik Vision kanıtı`,
+      mimeType: 'image/jpeg',
+      data: await blobToBase64(rendered),
+    } satisfies PreparedNewspaperVisionImage;
+  } finally {
+    bitmap.close();
+  }
+}
+
+export async function prepareNewspaperDiscoveryPage(blob: Blob, sourceName: string) {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const scale = Math.min(1, DISCOVERY_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Gazete keşif çizim alanı oluşturulamadı.');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    const rendered = await canvasToJpeg(canvas, DISCOVERY_JPEG_QUALITY);
+    return {
+      name: `${sourceName} · orijinal tam sayfa keşif görseli · koordinatlar doğrudan bu sayfaya aittir`,
       mimeType: 'image/jpeg',
       data: await blobToBase64(rendered),
     } satisfies PreparedNewspaperVisionImage;
@@ -167,11 +192,10 @@ export async function prepareNewspaperVisionComposite(blob: Blob, sourceName: st
 }
 
 /**
- * API yüzeyi korunur; ancak sağlayıcılara artık üç ayrı image[] gönderilmez.
- * Tam sayfa + üst + alt yakın plan tek JPEG içinde birleştirilir.
- * Böylece OpenRouter/NVIDIA gibi bazı VLM gateway'lerinde image[1]/image[2]
- * dönüştürme hatası oluşmazken yakın plan kanıtı korunur.
+ * İlk geçiş artık kolaj kullanmaz. Model yalnız orijinal tam sayfayı görür;
+ * dolayısıyla x/y/w/h koordinatları doğrudan orijinal gazete sayfasına aittir.
+ * Yakın plan okuma ikinci, H-etiketli doğrulama geçişinde yapılır.
  */
 export async function prepareNewspaperVisionViews(blob: Blob, sourceName: string) {
-  return [await prepareNewspaperVisionComposite(blob, sourceName)];
+  return [await prepareNewspaperDiscoveryPage(blob, sourceName)];
 }
