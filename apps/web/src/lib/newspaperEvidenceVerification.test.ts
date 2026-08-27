@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyVerifiedNewspaperText,
   computeNewspaperVerificationCrop,
+  hasLocalOcrDetailSupport,
   hasLocalOcrHeadlineSupport,
   reconcileVerifiedNewspaperText,
 } from './newspaperEvidenceVerification';
@@ -32,11 +33,11 @@ const discovered = [
 ];
 
 describe('newspaper evidence verification', () => {
-  it('Vision-2 başlığı Vision-1 ile birebir uyuşmuyorsa düzeltme diye yayınlamaz', () => {
-    const verified = applyVerifiedNewspaperText(discovered, [
+  it('Vision-1 yalnız konum keşfidir; Vision-2 başlığı aynı kırpım OCR kanıtı destekliyorsa yayın adayı olur', () => {
+    const consensus = reconcileVerifiedNewspaperText(discovered, [
       {
         sourceHeadlineId: 'H1',
-        baslik: "FİBA'DA TUR GECESİ",
+        baslik: "AVRUPA'DA TUR GECESİ",
         aciklama: 'Fenerbahçe Avrupa kupalarında tur için sahaya çıkıyor. Temsilcimiz avantajlı skor arıyor.',
       },
       {
@@ -44,42 +45,52 @@ describe('newspaper evidence verification', () => {
         baslik: 'Banka takipte üretici dertli',
         aciklama: 'Üreticiler kredi faizlerini ödemekte zorlanıyor. Bankaların takibi artıyor.',
       },
-    ]);
+    ], new Map([
+      ['H1', "Avrupa'da tur gecesi\nFenerbahçe Avrupa kupalarında tur için sahaya çıkıyor.\nTemsilcimiz avantajlı skor arıyor."],
+      ['H2', 'Banka takipte üretici dertli\nÜreticiler kredi faizlerini ödemekte zorlanıyor.\nBankaların takibi artıyor.'],
+    ]));
 
-    expect(verified).toHaveLength(1);
-    expect(verified[0].id).toBe('H2');
-    expect(JSON.stringify(verified)).not.toContain("FİBA'DA TUR GECESİ");
+    expect(consensus.candidates).toHaveLength(2);
+    expect(consensus.rejections).toEqual([]);
   });
 
-  it('videoda görülen promosyon yeniden-yazımını mutabakat kapısında reddeder', () => {
-    const result = reconcileVerifiedNewspaperText([
-      {
-        id: 'H1', text: 'EMEKLİLERE YÜKSEK PROMOSYON FORMÜLÜ',
-        detail: 'Bankalar emekliler için yeni promosyon formüllerini değerlendiriyor.',
-        confidence: 100, score: 100, x: 5, y: 5, w: 25, h: 10,
-      },
-    ], [{
+  it('Vision-2 yanlış başlığı aynı kırpım OCR kanıtı desteklemiyorsa reddeder', () => {
+    const result = reconcileVerifiedNewspaperText([discovered[0]], [{
       sourceHeadlineId: 'H1',
-      baslik: 'EMEKLİLERE PROMOSYON FIRSATI',
-      aciklama: 'Bankalar emekliler için yeni promosyon formüllerini değerlendiriyor.',
-    }]);
+      baslik: "FİBA'DA TUR GECESİ",
+      aciklama: 'Fenerbahçe Avrupa kupalarında tur için sahaya çıkıyor. Temsilcimiz avantajlı skor arıyor.',
+    }], new Map([
+      ['H1', "Avrupa'da tur gecesi\nFenerbahçe Avrupa kupalarında tur için sahaya çıkıyor.\nTemsilcimiz avantajlı skor arıyor."],
+    ]));
 
     expect(result.candidates).toEqual([]);
-    expect(result.rejections[0].reason).toContain('birebir uyuşmuyor');
+    expect(result.rejections[0].reason).toContain('başlığını yeterince desteklemiyor');
   });
 
-  it('yerel OCR başlığı destekliyorsa Vision metnini değiştirmeden geçirir', () => {
-    expect(hasLocalOcrHeadlineSupport(
-      "AVRUPA'DA TUR GECESİ",
-      "Avrupa'da tur gecesi\nFenerbahçe bu akşam sahaya çıkacak",
+  it('Vision-2 açıklaması OCR kanıtıyla uyuşmuyorsa doğru başlığa rağmen reddeder', () => {
+    const result = reconcileVerifiedNewspaperText([discovered[0]], [{
+      sourceHeadlineId: 'H1',
+      baslik: "AVRUPA'DA TUR GECESİ",
+      aciklama: 'Bambaşka bir haberin açıklaması bu karta yanlışlıkla taşındı ve burada yer almıyor.',
+    }], new Map([
+      ['H1', "Avrupa'da tur gecesi\nFenerbahçe Avrupa kupalarında tur için sahaya çıkıyor.\nTemsilcimiz avantajlı skor arıyor."],
+    ]));
+
+    expect(result.candidates).toEqual([]);
+    expect(result.rejections[0].reason).toContain('açıklamasını yeterince desteklemiyor');
+  });
+
+  it('yerel OCR başlığı ve açıklamayı ayrı ayrı destekler', () => {
+    const evidence = "Avrupa'da tur gecesi\nFenerbahçe Avrupa kupalarında tur için sahaya çıkıyor.\nTemsilcimiz avantajlı skor arıyor.";
+    expect(hasLocalOcrHeadlineSupport("AVRUPA'DA TUR GECESİ", evidence)).toBe(true);
+    expect(hasLocalOcrHeadlineSupport("FİBA'DA TUR GECESİ", evidence)).toBe(false);
+    expect(hasLocalOcrDetailSupport(
+      'Fenerbahçe Avrupa kupalarında tur için sahaya çıkıyor. Temsilcimiz avantajlı skor arıyor.',
+      evidence,
     )).toBe(true);
-    expect(hasLocalOcrHeadlineSupport(
-      "FİBA'DA TUR GECESİ",
-      "Avrupa'da tur gecesi\nFenerbahçe bu akşam sahaya çıkacak",
-    )).toBe(false);
-    expect(hasLocalOcrHeadlineSupport(
-      "DENİZOĞLU'NUN ÖLÜMÜNDE CİNAYET",
-      "Denizoğlu'nun ölümünde cinayet izi\nsoruşturması sürüyor",
+    expect(hasLocalOcrDetailSupport(
+      'Başka bir haberin açıklaması burada yer almıyor ve doğrulanmamalı.',
+      evidence,
     )).toBe(false);
   });
 
@@ -101,6 +112,6 @@ describe('newspaper evidence verification', () => {
     expect(crop.top).toBeGreaterThanOrEqual(0);
     expect(crop.left + crop.width).toBeLessThanOrEqual(1600);
     expect(crop.top + crop.height).toBeLessThanOrEqual(2400);
-    expect(crop.height).toBeGreaterThan(2400 * 0.12 - 2);
+    expect(crop.height).toBeGreaterThan(2400 * 0.16 - 2);
   });
 });
