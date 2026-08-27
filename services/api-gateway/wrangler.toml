@@ -1,4 +1,4 @@
-# OTONOM 3.14.53 production deploy · newspaper provider handoff and compact verification
+# OTONOM 3.14.54 production deploy · strict headline grounding · local OCR rejection guard · subtitle safety
 name = "api"
 main = "src/index.ts"
 compatibility_date = "2024-01-15"

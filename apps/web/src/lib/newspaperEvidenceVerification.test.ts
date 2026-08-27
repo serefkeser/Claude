@@ -2,24 +2,26 @@ import { describe, expect, it } from 'vitest';
 import {
   applyVerifiedNewspaperText,
   computeNewspaperVerificationCrop,
+  hasLocalOcrHeadlineSupport,
+  reconcileVerifiedNewspaperText,
 } from './newspaperEvidenceVerification';
 
 const discovered = [
   {
     id: 'H1',
-    text: 'Aşın saçılar öfkeyi çaldı',
-    detail: 'Yanlış komşu haber metni.',
+    text: "AVRUPA'DA TUR GECESİ",
+    detail: 'Fenerbahçe Avrupa kupalarında tur için sahaya çıkıyor. Temsilcimiz avantajlı skor arıyor.',
     confidence: 100,
     score: 100,
-    x: 68,
-    y: 20,
-    w: 27,
-    h: 12,
+    x: 35,
+    y: 8,
+    w: 28,
+    h: 10,
   },
   {
     id: 'H2',
     text: 'Banka takipte üretici dertli',
-    detail: 'İlk okuma detayı.',
+    detail: 'Üreticiler kredi faizlerini ödemekte zorlanıyor. Bankaların takibi artıyor.',
     confidence: 100,
     score: 90,
     x: 34,
@@ -30,32 +32,62 @@ const discovered = [
 ];
 
 describe('newspaper evidence verification', () => {
-  it('başlık ve açıklamayı yalnız aynı H kimliğinin ikinci Vision okumasından değiştirir', () => {
+  it('Vision-2 başlığı Vision-1 ile birebir uyuşmuyorsa düzeltme diye yayınlamaz', () => {
     const verified = applyVerifiedNewspaperText(discovered, [
       {
         sourceHeadlineId: 'H1',
-        baslik: 'Aşırı sağcılar öfkeyi çaldı',
-        aciklama: 'Meloni’nin aşırı sağcı hükümeti var olmayan bir gerçeklik inşa ediyor.',
+        baslik: "FİBA'DA TUR GECESİ",
+        aciklama: 'Fenerbahçe Avrupa kupalarında tur için sahaya çıkıyor. Temsilcimiz avantajlı skor arıyor.',
       },
       {
         sourceHeadlineId: 'H2',
         baslik: 'Banka takipte üretici dertli',
-        aciklama: 'Üreticiler kredi faizlerini ödemekte zorlanıyor.',
+        aciklama: 'Üreticiler kredi faizlerini ödemekte zorlanıyor. Bankaların takibi artıyor.',
       },
     ]);
 
-    expect(verified[0].text).toBe('Aşırı sağcılar öfkeyi çaldı');
-    expect(verified[0].detail).not.toContain('komşu');
-    expect(verified[0].x).toBe(68);
-    expect(verified[1].text).toBe('Banka takipte üretici dertli');
+    expect(verified).toHaveLength(1);
+    expect(verified[0].id).toBe('H2');
+    expect(JSON.stringify(verified)).not.toContain("FİBA'DA TUR GECESİ");
+  });
+
+  it('videoda görülen promosyon yeniden-yazımını mutabakat kapısında reddeder', () => {
+    const result = reconcileVerifiedNewspaperText([
+      {
+        id: 'H1', text: 'EMEKLİLERE YÜKSEK PROMOSYON FORMÜLÜ',
+        detail: 'Bankalar emekliler için yeni promosyon formüllerini değerlendiriyor.',
+        confidence: 100, score: 100, x: 5, y: 5, w: 25, h: 10,
+      },
+    ], [{
+      sourceHeadlineId: 'H1',
+      baslik: 'EMEKLİLERE PROMOSYON FIRSATI',
+      aciklama: 'Bankalar emekliler için yeni promosyon formüllerini değerlendiriyor.',
+    }]);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.rejections[0].reason).toContain('birebir uyuşmuyor');
+  });
+
+  it('yerel OCR başlığı destekliyorsa Vision metnini değiştirmeden geçirir', () => {
+    expect(hasLocalOcrHeadlineSupport(
+      "AVRUPA'DA TUR GECESİ",
+      "Avrupa'da tur gecesi\nFenerbahçe bu akşam sahaya çıkacak",
+    )).toBe(true);
+    expect(hasLocalOcrHeadlineSupport(
+      "FİBA'DA TUR GECESİ",
+      "Avrupa'da tur gecesi\nFenerbahçe bu akşam sahaya çıkacak",
+    )).toBe(false);
+    expect(hasLocalOcrHeadlineSupport(
+      "DENİZOĞLU'NUN ÖLÜMÜNDE CİNAYET",
+      "Denizoğlu'nun ölümünde cinayet izi\nsoruşturması sürüyor",
+    )).toBe(false);
   });
 
   it('H kimliği olmayan veya açıklaması olmayan ikinci okuma sonucunu yayın adayı yapmaz', () => {
     const verified = applyVerifiedNewspaperText(discovered, [
-      { sourceHeadlineId: 'H1', baslik: 'Aşırı sağcılar öfkeyi çaldı', aciklama: '' },
+      { sourceHeadlineId: 'H1', baslik: "AVRUPA'DA TUR GECESİ", aciklama: '' },
       { sourceHeadlineId: 'H9', baslik: 'Başka haber', aciklama: 'Başka açıklama.' },
     ]);
-
     expect(verified).toEqual([]);
   });
 
@@ -65,7 +97,6 @@ describe('newspaper evidence verification', () => {
       imageHeight: 2400,
       candidate: discovered[0],
     });
-
     expect(crop.left).toBeGreaterThanOrEqual(0);
     expect(crop.top).toBeGreaterThanOrEqual(0);
     expect(crop.left + crop.width).toBeLessThanOrEqual(1600);

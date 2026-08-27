@@ -289,11 +289,18 @@ function fitLines(
   return { size, lines: lines.slice(0, maxLines) };
 }
 
-function subtitleChunk(text: string, progress: number) {
+export function splitSubtitleChunks(text: string, wordsPerChunk = 4) {
   const words = text.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return '';
+  if (!words.length) return [];
+  const size = Math.max(1, Math.floor(wordsPerChunk));
   const chunks: string[] = [];
-  for (let index = 0; index < words.length; index += 5) chunks.push(words.slice(index, index + 5).join(' '));
+  for (let index = 0; index < words.length; index += size) chunks.push(words.slice(index, index + size).join(' '));
+  return chunks;
+}
+
+function subtitleChunk(text: string, progress: number) {
+  const chunks = splitSubtitleChunks(text, 4);
+  if (!chunks.length) return '';
   return chunks[Math.min(chunks.length - 1, Math.floor(progress * chunks.length))];
 }
 
@@ -408,16 +415,26 @@ function drawTargetContentScene(
   if (config.subtitles !== 'off') {
     const subtitle = subtitleChunk(scene.spokenText, progress);
     if (subtitle) {
+      const fontFamily = getFontFamily(config.fontStyle);
+      const maxTextWidth = width * 0.88;
+      const minimumFontSize = Math.max(18, Math.round(width * 0.026));
       let fontSize = Math.round(width * 0.052);
-      ctx.font = `900 ${fontSize}px ${getFontFamily(config.fontStyle)}`;
-      while (ctx.measureText(subtitle).width > width * 0.91 && fontSize > width * 0.035) {
+      let lines: string[] = [];
+      while (fontSize >= minimumFontSize) {
+        ctx.font = `900 ${fontSize}px ${fontFamily}`;
+        lines = wrapText(ctx, subtitle, maxTextWidth);
+        const widest = Math.max(...lines.map(line => ctx.measureText(line).width), 0);
+        if (lines.length <= 2 && widest <= maxTextWidth) break;
         fontSize -= 1;
-        ctx.font = `900 ${fontSize}px ${getFontFamily(config.fontStyle)}`;
       }
-      const boxWidth = Math.min(width * 0.96, ctx.measureText(subtitle).width + fontSize * 1.1);
-      const boxHeight = fontSize * 1.5;
+      ctx.font = `900 ${fontSize}px ${fontFamily}`;
+      lines = wrapText(ctx, subtitle, maxTextWidth).slice(0, 2);
+      const widest = Math.max(...lines.map(line => Math.min(maxTextWidth, ctx.measureText(line).width)), 1);
+      const lineHeight = fontSize * 1.12;
+      const boxWidth = Math.min(width * 0.96, widest + fontSize * 1.15);
+      const boxHeight = lines.length * lineHeight + fontSize * 0.58;
       const boxX = (width - boxWidth) / 2;
-      const boxY = height * 0.71;
+      const boxY = height * 0.705;
       ctx.fillStyle = '#2563eb';
       ctx.beginPath();
       ctx.roundRect(boxX, boxY, boxWidth, boxHeight, fontSize * 0.18);
@@ -425,7 +442,10 @@ function drawTargetContentScene(
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(subtitle, width / 2, boxY + boxHeight / 2);
+      lines.forEach((line, index) => {
+        const y = boxY + fontSize * 0.29 + lineHeight * (index + 0.5);
+        ctx.fillText(line, width / 2, y, maxTextWidth);
+      });
     }
   }
 }

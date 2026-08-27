@@ -7,8 +7,9 @@ import {
 } from './newspaperPipeline';
 import { prepareNewspaperVisionViews } from './newspaperVisionViews';
 import {
-  applyVerifiedNewspaperText,
   prepareNewspaperEvidenceSheet,
+  readLocalHeadlineOcrEvidence,
+  reconcileVerifiedNewspaperText,
 } from './newspaperEvidenceVerification';
 import { fetchWithNetworkRetry } from './networkRetry';
 import type { VisionNewspaperCandidate } from './newspaperVisionRecovery';
@@ -187,6 +188,20 @@ async function mediaToNewspaperEvidenceImage(
   if (!response.ok) throw new Error(`${media.name} birebir doğrulama için açılamadı.`);
   const source = await response.blob();
   return prepareNewspaperEvidenceSheet(source, candidates, media.name || 'Gazete');
+}
+
+async function mediaToNewspaperHeadlineOcrEvidence(
+  media: MediaFile,
+  candidates: VerifiedNewspaperCandidate[],
+) {
+  const url = media.url || media.thumbnailUrl;
+  if (!url || media.type !== 'image') {
+    throw new Error('Gazete yerel OCR doğrulaması için geçerli bir gazete görseli gerekli.');
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${media.name} yerel OCR doğrulaması için açılamadı.`);
+  const source = await response.blob();
+  return readLocalHeadlineOcrEvidence(source, candidates);
 }
 
 async function request<T>(path: string, body: unknown, allowTokenPrompt = true): Promise<T> {
@@ -474,14 +489,36 @@ export async function analyzeForVideo(options: {
     );
   }
 
-  const verifiedCandidates = applyVerifiedNewspaperText(
+  writeSystemLog(
+    'Gazete yerel OCR doğrulama kapısı: Tesseract yalnız aynı kırpımda Vision başlığını destekliyor mu kontrol edecek; OCR metni yazı veya TTS kaynağı olmayacak.',
+  );
+  let localOcrEvidence: ReadonlyMap<string, string>;
+  try {
+    localOcrEvidence = await mediaToNewspaperHeadlineOcrEvidence(imageCandidates[0], candidates);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Gazete yerel OCR doğrulama kapısı çalışmadı; doğrulanmamış metin videoya alınmadı. ${reason}`);
+  }
+
+  const consensus = reconcileVerifiedNewspaperText(
     candidates,
     verificationResult.script.gazeteBasliklari || [],
+    localOcrEvidence,
   );
+  consensus.rejections.forEach(rejection => writeSystemLog(
+    `Gazete metin mutabakatı reddedildi ${rejection.id}: ${rejection.reason} · Vision-1="${rejection.discoveredHeadline}" · Vision-2="${rejection.verifiedHeadline}"`,
+    'warn',
+  ));
+  const verifiedCandidates = consensus.candidates;
   writeSystemLog(
-    `Gazete birebir doğrulama tamamlandı: ${verifiedCandidates.length}/${candidates.length} haber başlığı + açıklaması ikinci Vision okumasıyla H kimliğine kilitlendi.`,
+    `Gazete üçlü doğrulama tamamlandı: ${verifiedCandidates.length}/${candidates.length} haber · Vision-1 + farklı Vision geçişi + yerel OCR kanıtı.`,
     verifiedCandidates.length >= 5 ? 'success' : 'warn',
   );
+  if (verifiedCandidates.length < 5) {
+    throw new Error(
+      `En az 5 haber iki Vision geçişi ve aynı gazete kırpımındaki yerel OCR kanıtıyla birebir doğrulanamadı; yanlış video üretilmedi. Doğrulanan: ${verifiedCandidates.length}/${candidates.length}.`,
+    );
+  }
 
   const orderedScript = buildLockedNewspaperScript({
     script: verificationResult.script,
@@ -490,7 +527,7 @@ export async function analyzeForVideo(options: {
   });
 
   writeSystemLog(
-    `Gazete sahneleri hazır: ${orderedScript.videoSlides.length} haber · yazı ve TTS yalnız ikinci birebir Vision okumasından üretildi · AI görsel yok.`,
+    `Gazete sahneleri hazır: ${orderedScript.videoSlides.length} haber · başlıklar iki Vision geçişi + yerel OCR kanıtıyla kilitlendi · OCR metni yayında kullanılmadı · AI görsel yok.`,
     'success',
   );
 
