@@ -1,0 +1,83 @@
+name: Verify OTONOM 3.14.56 OCR Anchoring
+
+on:
+  push:
+    branches:
+      - fix/newspaper-ocr-anchor-3.14.56
+    paths:
+      - .github/newspaper-ocr-anchor-3.14.56.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: fix/newspaper-ocr-anchor-3.14.56
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply deterministic OCR anchor patch
+        run: python .github/scripts/patch-newspaper-ocr-anchor-3.14.56.py
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Set OTONOM 3.14.56 version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" = "3.14.55" ]; then
+            npm run version:bump
+          elif [ "$CURRENT" != "3.14.56" ]; then
+            echo "Unexpected version: $CURRENT"
+            exit 1
+          fi
+
+      - name: Check version consistency
+        run: npm run version:check
+
+      - name: Run full Vitest suite
+        run: npm test
+
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=apps/web
+
+      - name: Build web app
+        run: npm run build:web
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+
+      - name: Typecheck AI gateway
+        run: npm run typecheck --workspace=services/api-gateway
+
+      - name: Test AI gateway
+        run: npm run test --workspace=services/api-gateway
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright browser e2e
+        run: npm run test:e2e
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+
+      - name: Commit verified generated changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps packages services package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo 'No generated source/version changes to commit.'
+          else
+            git commit -m 'fix: anchor newspaper headlines to OCR word boxes'
+            git push origin HEAD:fix/newspaper-ocr-anchor-3.14.56
+          fi
