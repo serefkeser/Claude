@@ -1,0 +1,71 @@
+name: Verify OTONOM 3.14.54 Final Stability
+
+on:
+  push:
+    branches:
+      - fix/final-stability-3.14.54
+    paths:
+      - .github/final-stability-3.14.54.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: fix/final-stability-3.14.54
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply final stability patch
+        run: |
+          python .github/scripts/patch-final-stability-3.14.54.py
+          python .github/scripts/patch-final-stability-3.14.54-hardening.py
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Set OTONOM 3.14.54 version
+        run: npm run version:bump
+
+      - name: Check version consistency
+        run: npm run version:check
+
+      - name: Run full Vitest suite
+        run: npm test
+
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=apps/web
+
+      - name: Build web app
+        run: npm run build --workspace=apps/web
+
+      - name: Typecheck AI gateway
+        run: npm run typecheck --workspace=services/api-gateway
+
+      - name: Test AI gateway
+        run: npm run test --workspace=services/api-gateway
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright browser e2e
+        run: npm run test:e2e
+
+      - name: Commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps packages services package.json package-lock.json
+          git diff --cached --exit-code && { echo "Expected verified source changes were not produced." >&2; exit 1; } || true
+          git commit -m "fix: ground newspaper text and contain subtitles"
+          git push origin HEAD:fix/final-stability-3.14.54
