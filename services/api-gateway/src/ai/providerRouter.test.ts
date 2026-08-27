@@ -297,6 +297,128 @@ describe('AI provider fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('gazete birebir doğrulamasında ilk Vision sağlayıcısını sona erteler', async () => {
+    const valid = JSON.stringify({
+      isContentUnreadable: false,
+      gazeteBasliklari: Array.from({ length: 5 }, (_, index) => ({
+        sourceHeadlineId: `H${index + 1}`,
+        baslik: `Başlık ${index + 1}`,
+        aciklama: `Açıklama ${index + 1}.`,
+      })),
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: valid }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GROQ_API_KEY: 'groq-test',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_VISION_PROVIDER_ORDER: 'groq,gemini',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaperVerification',
+      deferProvider: 'groq',
+      maxProviderCalls: 1,
+    });
+
+    expect(result.provider).toBe('gemini');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('generativelanguage.googleapis.com');
+  });
+
+  it('ertelenen Groq Vision sağlayıcısını alternatifler bittikten sonra en az 45 saniye bekletir', async () => {
+    vi.useFakeTimers();
+    const valid = JSON.stringify({
+      isContentUnreadable: false,
+      gazeteBasliklari: Array.from({ length: 5 }, (_, index) => ({
+        sourceHeadlineId: `H${index + 1}`,
+        baslik: `Başlık ${index + 1}`,
+        aciklama: `Açıklama ${index + 1}.`,
+      })),
+    });
+    const fetchMock = vi.fn().mockImplementation((input: unknown) => {
+      const url = String(input);
+      if (url.includes('generativelanguage.googleapis.com')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: '{"isContentUnreadable":true,"gazeteBasliklari":[]}' }] } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        choices: [{ message: { content: valid } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const validate = (text: string) => {
+      const parsed = JSON.parse(text) as { gazeteBasliklari?: unknown[] };
+      if (!Array.isArray(parsed.gazeteBasliklari) || parsed.gazeteBasliklari.length < 5) {
+        throw new Error('en az 5 haber gerekli');
+      }
+    };
+    const pending = generateWithFallback({
+      ENVIRONMENT: 'production',
+      GROQ_API_KEY: 'groq-test',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_VISION_PROVIDER_ORDER: 'groq,gemini',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaperVerification',
+      deferProvider: 'groq',
+      deferredProviderMinDelayMs: 45_000,
+      maxProviderCalls: 1,
+      validateResponse: validate,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(44_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2);
+    const result = await pending;
+    expect(result.provider).toBe('groq');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gazete birebir doğrulamasında yalnız H kimliği, başlık ve açıklama şemasını Geminiye gönderir', async () => {
+    const valid = JSON.stringify({
+      isContentUnreadable: false,
+      gazeteBasliklari: [{ sourceHeadlineId: 'H1', baslik: 'Başlık', aciklama: 'Açıklama.' }],
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: valid }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_VISION_PROVIDER_ORDER: 'gemini',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaperVerification',
+      maxProviderCalls: 1,
+    });
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as Record<string, any>;
+    const itemProperties = body.generationConfig.responseSchema.properties.gazeteBasliklari.items.properties;
+    expect(itemProperties).toHaveProperty('sourceHeadlineId');
+    expect(itemProperties).toHaveProperty('baslik');
+    expect(itemProperties).toHaveProperty('aciklama');
+    expect(itemProperties).not.toHaveProperty('onem');
+    expect(itemProperties).not.toHaveProperty('x');
+    expect(itemProperties).not.toHaveProperty('y');
+    expect(itemProperties).not.toHaveProperty('w');
+    expect(itemProperties).not.toHaveProperty('h');
+  });
+
   it('NVIDIA deneme uçlarını production ortamında varsayılan olarak kapatır', () => {
     expect(getConfiguredProviders({
       ENVIRONMENT: 'production',

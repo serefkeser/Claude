@@ -15,6 +15,7 @@ export interface AnalyzeConfig {
   tip?: string;
   sourceName?: string;
   yorum?: string;
+  deferVisionProvider?: string;
 }
 
 export interface AnalyzeInput {
@@ -55,14 +56,13 @@ Dil: ${language}.
 5. Bir kelimeyi güvenle okuyamıyorsan o H kartını tamamen atla. Eksik kelimeyi tahmin etme.
 6. Reklam, fotoğraf altyazısı, yazar künyesi, sayfa masthead'i veya başka haber metnini açıklamaya katma.
 7. En az 5 H kartını başlık+açıklama olarak güvenle doğrulayamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için uydurma üretme.
-8. Bu ikinci geçişte koordinatlar kullanılmayacak; x=0, y=0, w=100, h=100 döndür.
-9. onem alanını H1 için 100, H2 için 90, H3 için 80 şeklinde azalan sırada ver.
+8. Bu ikinci geçişte yalnız sourceHeadlineId, baslik ve aciklama döndür. Koordinat, önem puanı veya başka alan üretme.
 
 Yalnız şu JSON yapısını döndür:
 {
   "isContentUnreadable": boolean,
   "gazeteBasliklari": [
-    {"sourceHeadlineId": "H1", "baslik": string, "aciklama": string, "onem": number, "x": 0, "y": 0, "w": 100, "h": 100}
+    {"sourceHeadlineId": "H1", "baslik": string, "aciklama": string}
   ]
 }`;
 }

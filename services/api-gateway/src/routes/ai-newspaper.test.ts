@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeNewspaperScript } from './ai';
+import { normalizeNewspaperScript, normalizeNewspaperVerificationScript } from './ai';
+
+describe('AI newspaper compact second-pass verification', () => {
+  it('yalnız H kimliği + başlık + açıklama gelen sonucu sahne sözleşmesi için güvenli varsayımlarla tamamlar', () => {
+    const normalized = normalizeNewspaperVerificationScript({
+      gazeteBasliklari: Array.from({ length: 5 }, (_, index) => ({
+        sourceHeadlineId: `H${index + 1}`,
+        baslik: `Birebir başlık ${index + 1}`,
+        aciklama: `Birebir açıklama ${index + 1}.`,
+      })),
+    });
+
+    expect(normalized.isContentUnreadable).toBe(false);
+    expect(normalized.gazeteBasliklari).toHaveLength(5);
+    expect(normalized.gazeteBasliklari[0]).toEqual(expect.objectContaining({
+      sourceHeadlineId: 'H1',
+      baslik: 'Birebir başlık 1',
+      aciklama: 'Birebir açıklama 1.',
+      onem: 100,
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+    }));
+  });
+});
 
 describe('AI newspaper normalization — Hermes 10 Vision-first', () => {
   it('yerel OCR bozuk olsa bile tam görseldeki 5+ haber başlıklarını ana kaynak olarak korur', () => {

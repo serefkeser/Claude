@@ -454,6 +454,9 @@ export async function analyzeForVideo(options: {
   writeSystemLog(
     `Gazete birebir okuma doğrulaması: ${candidates.length} haber H1-H${candidates.length} olarak ayrı kırpımlarda büyütüldü; ikinci Vision geçişi başlatılıyor.`,
   );
+  writeSystemLog(
+    `Gazete Vision sağlayıcı devri: ilk keşifte ${result.provider} kullanıldı; ikinci geçişte aynı sağlayıcı ücretsiz kota çakışmasını önlemek için sona ertelenecek.`,
+  );
   const verificationResult = await request<AnalyzeResult>('/analyze', {
     inputType: 'gazete',
     text: 'GAZETE BİREBİR DOĞRULAMA: Görsel H1-H9 etiketli bağımsız haber kırpımlarından oluşur. Her H kartında yalnız o kartın basılı başlığını ve fiziksel olarak bağlı spot/açıklamasını birebir oku. Önceki okuma metnini tahmin veya düzeltme kaynağı olarak kullanma. Kartlar arasında kelime veya cümle taşıma. sourceHeadlineId alanını kart etiketiyle aynen döndür.',
@@ -461,6 +464,7 @@ export async function analyzeForVideo(options: {
     config: {
       ...requestConfig,
       analysisMode: 'newspaper_verify',
+      deferVisionProvider: result.provider,
     },
   });
 

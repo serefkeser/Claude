@@ -51,10 +51,12 @@ export interface AiGenerationRequest {
   temperature?: number;
   maxTokens?: number;
   responseFormat?: 'text' | 'json';
-  responseSchema?: 'hermes' | 'newspaper';
+  responseSchema?: 'hermes' | 'newspaper' | 'newspaperVerification';
   validateResponse?: (text: string) => void;
   providerTimeoutMs?: number;
   maxProviderCalls?: number;
+  deferProvider?: AiProviderName;
+  deferredProviderMinDelayMs?: number;
 }
 
 export interface AiProviderAttempt {
@@ -91,7 +93,7 @@ interface ProviderDefinition {
 }
 
 const DEFAULT_TEXT_ORDER: AiProviderName[] = ['gemini', 'openrouter', 'groq', 'opencode', 'nvidia'];
-const DEFAULT_VISION_ORDER: AiProviderName[] = ['groq', 'nvidia', 'gemini', 'openrouter'];
+const DEFAULT_VISION_ORDER: AiProviderName[] = ['groq', 'gemini', 'openrouter'];
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_VISION_TIMEOUT_MS = 40_000;
 const OPENROUTER_VISION_TIMEOUT_MS = 55_000;
@@ -164,7 +166,28 @@ const NEWSPAPER_RESPONSE_SCHEMA = {
   required: ['isContentUnreadable', 'gazeteBasliklari'],
 };
 
+const NEWSPAPER_VERIFICATION_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    isContentUnreadable: { type: 'BOOLEAN' },
+    gazeteBasliklari: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          sourceHeadlineId: { type: 'STRING' },
+          baslik: { type: 'STRING' },
+          aciklama: { type: 'STRING' },
+        },
+        required: ['sourceHeadlineId', 'baslik', 'aciklama'],
+      },
+    },
+  },
+  required: ['isContentUnreadable', 'gazeteBasliklari'],
+};
+
 function selectedResponseSchema(request: AiGenerationRequest) {
+  if (request.responseSchema === 'newspaperVerification') return NEWSPAPER_VERIFICATION_RESPONSE_SCHEMA;
   return request.responseSchema === 'newspaper'
     ? NEWSPAPER_RESPONSE_SCHEMA
     : HERMES_RESPONSE_SCHEMA;
@@ -366,9 +389,11 @@ async function callOpenAiCompatible(
 
   if (request.responseFormat === 'json' && provider.jsonMode && !options.plainJsonTransport) {
     if (provider.name === 'openrouter') {
-      const schemaName = request.responseSchema === 'newspaper'
-        ? 'otonom_newspaper'
-        : 'otonom_script';
+      const schemaName = request.responseSchema === 'newspaperVerification'
+        ? 'otonom_newspaper_verification'
+        : request.responseSchema === 'newspaper'
+          ? 'otonom_newspaper'
+          : 'otonom_script';
       body.response_format = {
         type: 'json_schema',
         json_schema: {
@@ -496,13 +521,27 @@ export async function generateWithFallback(
   env: AiProviderEnv,
   request: AiGenerationRequest,
 ): Promise<AiGenerationResult> {
-  const providers = getProviderDefinitions(env, request.task);
+  const baseProviders = getProviderDefinitions(env, request.task);
+  const providers = request.deferProvider
+    ? [
+      ...baseProviders.filter(provider => provider.name !== request.deferProvider),
+      ...baseProviders.filter(provider => provider.name === request.deferProvider),
+    ]
+    : baseProviders;
   if (!providers.length) {
     throw new Error('Bu görev için yapılandırılmış ücretsiz AI sağlayıcısı yok.');
   }
 
   const attempts: AiProviderAttempt[] = [];
+  const generationStartedAt = Date.now();
   for (const provider of providers) {
+    if (provider.name === request.deferProvider) {
+      const minimumDelay = Number(request.deferredProviderMinDelayMs || 0);
+      if (Number.isFinite(minimumDelay) && minimumDelay > 0) {
+        const remainingDelay = Math.floor(minimumDelay) - (Date.now() - generationStartedAt);
+        if (remainingDelay > 0) await sleep(remainingDelay);
+      }
+    }
     const defaultProviderCalls = provider.name === 'gemini'
       || ((provider.name === 'openrouter' || provider.name === 'groq') && request.responseFormat === 'json')
       ? 2

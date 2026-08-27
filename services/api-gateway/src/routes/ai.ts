@@ -5,6 +5,7 @@ import {
   synthesizeSpeech,
   type AiProviderAttempt,
   type AiProviderEnv,
+  type AiProviderName,
 } from '../ai/providerRouter';
 import { buildAnalyzeMessages, type AnalyzeInput } from '../ai/promptBuilder';
 import { parseAiJsonObject, validateHermesNewspaperResponse, validateHermesScriptResponse } from '../ai/jsonResponse';
@@ -19,7 +20,8 @@ const MAX_TEXT_CHARS = 40_000;
 const MAX_TTS_CHARS = 5_000;
 const NEWSPAPER_VERIFICATION_PROVIDER_TIMEOUT_MS = 18_000;
 const NEWSPAPER_VERIFICATION_MAX_PROVIDER_CALLS = 1;
-const NEWSPAPER_VERIFICATION_MAX_TOKENS = 3_072;
+const NEWSPAPER_VERIFICATION_MAX_TOKENS = 1_536;
+const NEWSPAPER_VERIFICATION_GROQ_COOLDOWN_MS = 45_000;
 
 interface OcrHeadlineCandidate {
   id: string;
@@ -89,24 +91,33 @@ function normalizeHeadline(value: unknown) {
   return String(value || '').toLocaleLowerCase('tr-TR').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+function asAiProviderName(value: unknown): AiProviderName | undefined {
+  const name = String(value || '').trim().toLowerCase();
+  return ['groq', 'nvidia', 'opencode', 'openrouter', 'zenmux', 'gemini'].includes(name)
+    ? name as AiProviderName
+    : undefined;
+}
+
 function verificationHeadlineId(value: unknown) {
   const id = String(value || '').trim().toUpperCase();
   return /^H\d+$/.test(id) ? id : '';
 }
 
 function validateNewspaperVerificationResponse(text: string) {
-  validateHermesNewspaperResponse(text, []);
   const parsed = parseAiJsonObject(text);
   const headlines = Array.isArray(parsed.gazeteBasliklari)
     ? parsed.gazeteBasliklari.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
     : [];
-  const ids = new Set(
-    headlines
-      .map(item => verificationHeadlineId(item.sourceHeadlineId))
-      .filter(Boolean),
-  );
-  if (ids.size < 5) {
-    throw new Error('Gazete birebir doğrulamasında en az 5 farklı H kimliği korunamadı; diğer sağlayıcı deneniyor.');
+  const verified = headlines
+    .map(item => ({
+      id: verificationHeadlineId(item.sourceHeadlineId),
+      baslik: String(item.baslik || '').replace(/\s+/g, ' ').trim(),
+      aciklama: String(item.aciklama || '').replace(/\s+/g, ' ').trim(),
+    }))
+    .filter(item => item.id && item.baslik && item.aciklama);
+  const ids = new Set(verified.map(item => item.id));
+  if (parsed.isContentUnreadable === true || ids.size < 5) {
+    throw new Error('Gazete birebir doğrulamasında en az 5 farklı H kimliği başlık+açıklama ile doğrulanamadı; diğer sağlayıcı deneniyor.');
   }
 }
 
@@ -124,7 +135,15 @@ export function normalizeNewspaperVerificationScript(script: Record<string, unkn
     .filter(headline => headline.sourceHeadlineId && headline.baslik && headline.aciklama)
     .filter((headline, index, all) => all.findIndex(item => item.sourceHeadlineId === headline.sourceHeadlineId) === index)
     .sort((left, right) => Number(left.sourceHeadlineId.slice(1)) - Number(right.sourceHeadlineId.slice(1)))
-    .slice(0, 9);
+    .slice(0, 9)
+    .map((headline, index) => ({
+      ...headline,
+      onem: Math.max(10, 100 - index * 10),
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+    }));
 
   return {
     ...script,
@@ -215,7 +234,7 @@ aiRoutes.get('/health', c => c.json({
   data: {
     configured: getConfiguredProviders(c.env),
     textOrder: c.env.AI_TEXT_PROVIDER_ORDER || 'gemini,openrouter,groq,opencode,nvidia',
-    visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'groq,nvidia,gemini,openrouter',
+    visionOrder: c.env.AI_VISION_PROVIDER_ORDER || 'groq,gemini,openrouter',
     persistentMediaStorage: false,
   },
 }));
@@ -265,6 +284,9 @@ aiRoutes.post('/analyze', async c => {
     const ocrCandidates = parseOcrHeadlineCandidates(body.text || '');
     const isNewspaper = body.inputType === 'gazete';
     const isNewspaperVerification = isNewspaper && body.config?.analysisMode === 'newspaper_verify';
+    const deferredProvider = isNewspaperVerification
+      ? asAiProviderName(body.config?.deferVisionProvider)
+      : undefined;
     const generated = await generateWithFallback(c.env, {
       task: images.length ? 'vision' : 'text',
       messages: buildAnalyzeMessages({ ...body, images }),
@@ -272,8 +294,16 @@ aiRoutes.post('/analyze', async c => {
       maxTokens: isNewspaperVerification ? NEWSPAPER_VERIFICATION_MAX_TOKENS : isNewspaper ? 4096 : 6144,
       providerTimeoutMs: isNewspaperVerification ? NEWSPAPER_VERIFICATION_PROVIDER_TIMEOUT_MS : undefined,
       maxProviderCalls: isNewspaperVerification ? NEWSPAPER_VERIFICATION_MAX_PROVIDER_CALLS : undefined,
+      deferProvider: deferredProvider,
+      deferredProviderMinDelayMs: deferredProvider === 'groq'
+        ? NEWSPAPER_VERIFICATION_GROQ_COOLDOWN_MS
+        : undefined,
       responseFormat: 'json',
-      responseSchema: isNewspaper ? 'newspaper' : 'hermes',
+      responseSchema: isNewspaperVerification
+        ? 'newspaperVerification'
+        : isNewspaper
+          ? 'newspaper'
+          : 'hermes',
       validateResponse: isNewspaperVerification
         ? validateNewspaperVerificationResponse
         : isNewspaper
