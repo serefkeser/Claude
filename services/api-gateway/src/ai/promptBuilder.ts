@@ -50,7 +50,7 @@ Dil: ${language}.
 
 İKİNCİ GEÇİŞ — BİREBİR BAŞLIK + SPOT DOĞRULAMA:
 1. Gönderilen TEK görsel H1, H2, H3... etiketli bağımsız gazete haber kırpımlarından oluşur. Her kart ayrı bir haber kanıtıdır.
-2. Her kartta kırmızı çerçeve ilk geçişin bulduğu hedef haber bölgesini gösterir. Öncelikle kırmızı çerçeve içindeki büyük başlığı oku; açıklamayı yalnız aynı kartta bu başlığa fiziksel olarak bağlı metinden al.
+2. Her kartta kırmızı çerçeve, ilk Vision geçişinin kaba koordinatından bağımsız olarak tam sayfadaki yerel OCR kelime kutularından deterministik biçimde sabitlenen hedef başlığı gösterir. Öncelikle kırmızı çerçeve içindeki büyük başlığı oku; açıklamayı yalnız aynı kartta bu başlığa fiziksel olarak bağlı metinden al.
 3. sourceHeadlineId alanını kartın H etiketinden aynen kopyala. H kimliği uydurma veya değiştirme.
 4. baslik yalnız kartta büyük/başlık tipografisiyle basılı gerçek haber başlığıdır. Harfleri, Türkçe karakterleri, kelime sırasını ve sayıları birebir koru. Dilbilgisi düzeltme, tahmin, normalleştirme veya yeniden yazma yapma.
 5. aciklama yalnız AYNI kartta o başlığın hemen altında/yanında fiziksel olarak bağlı spot veya haber girişinden 1-2 tam cümledir. Başka H kartından veya komşu haberden tek kelime taşıma.
@@ -75,9 +75,9 @@ Dil: ${language}.
 
 BİRİNCİ GEÇİŞ — ORİJİNAL TAM SAYFADA KONUM KEŞFİ:
 1. Gönderilen TEK görsel doğrudan orijinal gazete ilk sayfasıdır; kolaj, yakın plan veya ikinci panel yoktur.
-2. Bu geçişin görevi yayın metni üretmek değil, en az 5 en fazla 9 gerçek haber bölgesini bulup ORİJİNAL sayfadaki konumlarını vermektir. Bu geçişteki baslik/aciklama yalnız bölge kimliği için okuma ipucudur ve videoda kullanılmayacaktır.
+2. Bu geçişin görevi yayın metni üretmek değil, güvenle ayırt edebildiğin mümkünse 8-12 farklı gerçek haber bölgesini bulmaktır; 8 yoksa en az 5 bul. Bu geçişteki baslik/aciklama yalnız bölge kimliği için okuma ipucudur ve videoda kullanılmayacaktır.
 3. Büyük ana manşetten daha küçük haber kutularına doğru farklı haber bölgeleri seç. Aynı haberi iki kez seçme.
-4. x/y/w/h değerleri doğrudan BU tam sayfada sol üst 0,0; sağ alt 100,100 olacak şekilde yüzde koordinatlarıdır. Başlık ve ona bağlı spotu birlikte kapsayan haber kutusunu işaretle.
+4. x/y/w/h değerleri BU tam sayfada sol üst 0,0; sağ alt 100,100 olacak şekilde yalnız KABA konum ipucudur. İstemci gerçek başlık piksel kutusunu yerel OCR words/bbox çıktısından yeniden sabitleyeceği için koordinatı kesinmiş gibi uydurma.
 5. baslik ve aciklama yalnız bölgede gerçekten görebildiğin metinden gelmeli; okuyamadığın kelimeyi uydurma. Ancak bu metin ikinci geçişte yeniden ve bağımsız okunacaktır.
 6. Reklam, ilan, bulmaca, masthead/logo, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
 7. En az 5 gerçek haber bölgesi bulamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için tahmin üretme.

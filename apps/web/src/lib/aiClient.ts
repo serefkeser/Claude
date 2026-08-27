@@ -11,6 +11,7 @@ import {
   readLocalHeadlineOcrEvidence,
   reconcileVerifiedNewspaperText,
 } from './newspaperEvidenceVerification';
+import { anchorNewspaperCandidatesWithLocalOcr } from './newspaperOcrAnchoring';
 import { fetchWithNetworkRetry } from './networkRetry';
 import type { VisionNewspaperCandidate } from './newspaperVisionRecovery';
 
@@ -18,6 +19,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 const MAX_ANALYSIS_IMAGES = 3;
 const MAX_IMAGE_EDGE = 1600;
 const MAX_NEWSPAPER_IMAGE_EDGE = 2600;
+const MAX_NEWSPAPER_DISCOVERY_CANDIDATES = 12;
 const ACCESS_TOKEN_STORAGE_KEY = 'hermes_ai_access_token';
 const ANALYZE_REQUEST_TIMEOUT_MS = 120_000;
 const TTS_REQUEST_TIMEOUT_MS = 70_000;
@@ -204,6 +206,20 @@ async function mediaToNewspaperHeadlineOcrEvidence(
   return readLocalHeadlineOcrEvidence(source, candidates);
 }
 
+async function mediaToNewspaperOcrAnchors(
+  media: MediaFile,
+  candidates: VerifiedNewspaperCandidate[],
+) {
+  const url = media.url || media.thumbnailUrl;
+  if (!url || media.type !== 'image') {
+    throw new Error('Gazete OCR konum ankrajı için geçerli bir gazete görseli gerekli.');
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${media.name} OCR konum ankrajı için açılamadı.`);
+  const source = await response.blob();
+  return anchorNewspaperCandidatesWithLocalOcr(source, candidates, MAX_NEWSPAPER_STORIES);
+}
+
 async function request<T>(path: string, body: unknown, allowTokenPrompt = true): Promise<T> {
   const accessToken = localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)?.trim();
   const startedAt = performance.now();
@@ -344,7 +360,7 @@ function buildHermes10NewspaperCandidates(script: HermesScript): VerifiedNewspap
       if (importance) return importance;
       return Number(right.w || 0) * Number(right.h || 0) - Number(left.w || 0) * Number(left.h || 0);
     })
-    .slice(0, MAX_NEWSPAPER_STORIES)
+    .slice(0, MAX_NEWSPAPER_DISCOVERY_CANDIDATES)
     .map((item, index) => ({
       id: `H${index + 1}`,
       text: item.baslik,
@@ -439,7 +455,7 @@ export async function analyzeForVideo(options: {
     text: [
       options.text.trim(),
       options.inputType === 'gazete'
-        ? 'GAZETE KEŞFİ: Gönderilen TEK görsel doğrudan orijinal tam gazete sayfasıdır. Bu ilk geçişin görevi yayın metni yazmak değil, en az 5 gerçek haber bölgesini bulup x/y/w/h koordinatlarını bu tam sayfanın 0-100 sisteminde vermektir. baslik/aciklama yalnız bölgeyi tanımaya yarayan okuma ipucudur ve videoda kullanılmayacaktır. Okuyamadığın kelimeyi uydurma.'
+        ? 'GAZETE KEŞFİ: Gönderilen TEK görsel doğrudan orijinal tam gazete sayfasıdır. Bu ilk geçişin görevi yayın metni yazmak değil, güvenle ayırt edebildiğin mümkünse 8-12 farklı gerçek haber bölgesini bulmaktır; 8 yoksa en az 5 bul. x/y/w/h yalnız kaba konum ipucudur ve istemci gerçek piksel konumunu yerel OCR kelime kutularından yeniden sabitleyecektir. baslik/aciklama yalnız bölgeyi tanımaya yarayan okuma ipucudur ve videoda kullanılmayacaktır. Okuyamadığın kelimeyi uydurma.'
         : '',
     ].filter(Boolean).join('\n\n'),
     images,
@@ -456,25 +472,48 @@ export async function analyzeForVideo(options: {
     );
   }
 
-  const candidates = buildHermes10NewspaperCandidates(result.script);
+  const discoveredCandidates = buildHermes10NewspaperCandidates(result.script);
   writeSystemLog(
-    `Hermes 10 gazete keşfi: Vision modelinden ${candidates.length} haber bölgesi bulundu; bu metinler henüz yayına alınmayacak.`,
+    `Hermes 10 gazete keşfi: Vision modelinden ${discoveredCandidates.length} haber bölgesi bulundu; koordinatlar henüz güvenilir kabul edilmeyecek ve bu metinler yayına alınmayacak.`,
+    discoveredCandidates.length >= 5 ? 'success' : 'warn',
+  );
+  if (discoveredCandidates.length < 5) {
+    throw new Error('Gazete keşfinde en az 5 haber bölgesi bulunamadı; OCR konum ankrajı başlatılmadı.');
+  }
+
+  writeSystemLog(
+    'Gazete OCR konum ankrajı: Tesseract tam sayfada yalnız blocks/words/bbox ile başlıkların gerçek piksel konumunu bulacak; OCR metni yayın veya TTS kaynağı olmayacak.',
+  );
+  let anchorResult: Awaited<ReturnType<typeof mediaToNewspaperOcrAnchors>>;
+  try {
+    anchorResult = await mediaToNewspaperOcrAnchors(imageCandidates[0], discoveredCandidates);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Gazete OCR konum ankrajı çalışmadı; AI koordinatına güvenilerek video üretilmedi. ${reason}`);
+  }
+  anchorResult.rejections.forEach(rejection => writeSystemLog(
+    `Gazete OCR ankrajı reddedildi ${rejection.id}: ${rejection.reason} · keşif-ipucu="${rejection.headline}"`,
+    'warn',
+  ));
+  const candidates = anchorResult.candidates;
+  writeSystemLog(
+    `Gazete OCR konum ankrajı tamamlandı: ${candidates.length}/${discoveredCandidates.length} benzersiz haber gerçek OCR kelime kutularına sabitlendi · ${anchorResult.lineCount} OCR satırı incelendi.`,
     candidates.length >= 5 ? 'success' : 'warn',
   );
   if (candidates.length < 5) {
-    throw new Error('Gazete keşfinde en az 5 haber bölgesi bulunamadı; birebir okuma doğrulaması başlatılmadı.');
+    throw new Error(`En az 5 haber gerçek OCR kelime kutularına güvenle sabitlenemedi; yanlış H kırpımı üretilmedi. Ankrajlanan: ${candidates.length}/${discoveredCandidates.length}.`);
   }
 
   const verificationImage = await mediaToNewspaperEvidenceImage(imageCandidates[0], candidates);
   writeSystemLog(
-    `Gazete birebir okuma doğrulaması: ${candidates.length} haber H1-H${candidates.length} olarak ayrı kırpımlarda büyütüldü; ikinci Vision geçişi başlatılıyor.`,
+    `Gazete birebir okuma doğrulaması: OCR kelime kutularına sabitlenen ${candidates.length} haber H1-H${candidates.length} olarak ayrı kırpımlarda büyütüldü; ikinci Vision geçişi başlatılıyor.`,
   );
   writeSystemLog(
     `Gazete Vision sağlayıcı devri: ilk keşifte ${result.provider} kullanıldı; ikinci geçişte aynı sağlayıcı ücretsiz kota çakışmasını önlemek için sona ertelenecek.`,
   );
   const verificationResult = await request<AnalyzeResult>('/analyze', {
     inputType: 'gazete',
-    text: 'GAZETE BİREBİR DOĞRULAMA: Görsel H1-H9 etiketli bağımsız haber kırpımlarından oluşur. Her karttaki kırmızı çerçeve hedef haber bölgesidir. Yalnız o hedefteki basılı başlığı ve fiziksel olarak bağlı spot/açıklamasını birebir oku. İlk keşif metnini tahmin veya düzeltme kaynağı olarak kullanma. Kartlar arasında kelime veya cümle taşıma. sourceHeadlineId alanını kart etiketiyle aynen döndür.',
+    text: 'GAZETE BİREBİR DOĞRULAMA: Görsel H1-H9 etiketli bağımsız haber kırpımlarından oluşur. Her karttaki kırmızı çerçeve AI koordinatından değil, tam sayfadaki yerel OCR kelime kutularından deterministik olarak sabitlenen hedef başlık bölgesidir. Yalnız o hedefteki basılı başlığı ve fiziksel olarak bağlı spot/açıklamasını birebir oku. İlk keşif metnini tahmin veya düzeltme kaynağı olarak kullanma. Kartlar arasında kelime veya cümle taşıma. sourceHeadlineId alanını kart etiketiyle aynen döndür.',
     images: [verificationImage],
     config: {
       ...requestConfig,
