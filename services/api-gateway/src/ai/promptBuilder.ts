@@ -42,6 +42,31 @@ function analysisInstruction(mode = 'yorumsuz') {
   return 'Yalnız haberi tarafsız ve yorumsuz anlat; 5N1K kurallarını uygula.';
 }
 
+function newspaperVerificationSystemPrompt(language: string) {
+  return `Sen OTONOM gazete birebir metin doğrulama motorusun.
+Çıktının tamamı geçerli JSON olmalı; Markdown, açıklama, düşünce metni veya kod bloğu kullanma.
+Dil: ${language}.
+
+İKİNCİ GEÇİŞ — BİREBİR BAŞLIK + SPOT DOĞRULAMA:
+1. Gönderilen TEK görsel H1, H2, H3... etiketli bağımsız gazete haber kırpımlarından oluşur. Her kart ayrı bir haber kanıtıdır.
+2. sourceHeadlineId alanını kartın H etiketinden aynen kopyala. H kimliği uydurma veya değiştirme.
+3. baslik yalnız kartta büyük/başlık tipografisiyle basılı gerçek haber başlığıdır. Harfleri, Türkçe karakterleri, kelime sırasını ve sayıları birebir koru. Dilbilgisi düzeltme, tahmin, normalleştirme veya yeniden yazma yapma.
+4. aciklama yalnız AYNI kartta o başlığın hemen altında/yanında fiziksel olarak bağlı spot veya haber girişinden 1-2 tam cümledir. Başka H kartından veya komşu haberden tek kelime taşıma.
+5. Bir kelimeyi güvenle okuyamıyorsan o H kartını tamamen atla. Eksik kelimeyi tahmin etme.
+6. Reklam, fotoğraf altyazısı, yazar künyesi, sayfa masthead'i veya başka haber metnini açıklamaya katma.
+7. En az 5 H kartını başlık+açıklama olarak güvenle doğrulayamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için uydurma üretme.
+8. Bu ikinci geçişte koordinatlar kullanılmayacak; x=0, y=0, w=100, h=100 döndür.
+9. onem alanını H1 için 100, H2 için 90, H3 için 80 şeklinde azalan sırada ver.
+
+Yalnız şu JSON yapısını döndür:
+{
+  "isContentUnreadable": boolean,
+  "gazeteBasliklari": [
+    {"sourceHeadlineId": "H1", "baslik": string, "aciklama": string, "onem": number, "x": 0, "y": 0, "w": 100, "h": 100}
+  ]
+}`;
+}
+
 function newspaperSystemPrompt(language: string) {
   return `Sen OTONOM gazete ilk sayfa okuma motorusun.
 Çıktının tamamı geçerli JSON olmalı; Markdown, açıklama, düşünce metni veya kod bloğu kullanma.
@@ -102,10 +127,13 @@ JSON şeması:
 export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
   const config = input.config || {};
   const isGazete = input.inputType === 'gazete';
+  const isNewspaperVerification = isGazete && config.analysisMode === 'newspaper_verify';
   const language = config.language || 'tr';
-  const system = isGazete
-    ? newspaperSystemPrompt(language)
-    : standardSystemPrompt(language, input);
+  const system = isNewspaperVerification
+    ? newspaperVerificationSystemPrompt(language)
+    : isGazete
+      ? newspaperSystemPrompt(language)
+      : standardSystemPrompt(language, input);
 
   const parts: AiContentPart[] = [];
   const sourceText = input.text?.trim();
@@ -125,9 +153,11 @@ export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
   }
   parts.push({
     type: 'text',
-    text: isGazete
-      ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nTek birleşik görselde soldaki tam sayfayı ve sağdaki iki yakın planı birlikte incele, tekrarları birleştir ve yalnız isContentUnreadable + gazeteBasliklari JSON yapısını döndür.`
-      : `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nİçerik türü: ${config.tip || 'haber'}\nVideo stili: ${config.videoStyle || 'cinematic'}\nEk kullanıcı yorumu: ${config.yorum || 'yok'}\nİçeriği analiz et ve yalnız şemaya uyan JSON döndür.`,
+    text: isNewspaperVerification
+      ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nH1-H9 kartlarını birbirinden bağımsız oku. sourceHeadlineId + birebir baslik + yalnız aynı karta bağlı aciklama alanlarını döndür.`
+      : isGazete
+        ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nTek birleşik görselde soldaki tam sayfayı ve sağdaki iki yakın planı birlikte incele, tekrarları birleştir ve yalnız isContentUnreadable + gazeteBasliklari JSON yapısını döndür.`
+        : `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nİçerik türü: ${config.tip || 'haber'}\nVideo stili: ${config.videoStyle || 'cinematic'}\nEk kullanıcı yorumu: ${config.yorum || 'yok'}\nİçeriği analiz et ve yalnız şemaya uyan JSON döndür.`,
   });
 
   return [
