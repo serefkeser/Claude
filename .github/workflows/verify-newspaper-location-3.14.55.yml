@@ -1,0 +1,83 @@
+name: Verify OTONOM 3.14.55 Newspaper Location
+
+on:
+  push:
+    branches:
+      - fix/newspaper-location-3.14.55
+    paths:
+      - .github/newspaper-location-3.14.55.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: fix/newspaper-location-3.14.55
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply deterministic aiClient patch
+        run: python .github/scripts/patch-newspaper-location-3.14.55.py
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Set OTONOM 3.14.55 version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" = "3.14.54" ]; then
+            npm run version:bump
+          elif [ "$CURRENT" != "3.14.55" ]; then
+            echo "Unexpected version: $CURRENT"
+            exit 1
+          fi
+
+      - name: Check version consistency
+        run: npm run version:check
+
+      - name: Run full Vitest suite
+        run: npm test
+
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=apps/web
+
+      - name: Build web app
+        run: npm run build:web
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+
+      - name: Typecheck AI gateway
+        run: npm run typecheck --workspace=services/api-gateway
+
+      - name: Test AI gateway
+        run: npm run test --workspace=services/api-gateway
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright browser e2e
+        run: npm run test:e2e
+        env:
+          VITE_API_URL: https://api.seref-keser.workers.dev
+
+      - name: Commit verified generated changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps packages services package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo 'No generated source/version changes to commit.'
+          else
+            git commit -m 'fix: separate newspaper location discovery from publication text'
+            git push origin HEAD:fix/newspaper-location-3.14.55
+          fi
