@@ -32,7 +32,7 @@ insert = anchor + """function hasVisionHeadlineConsensus(discovered: string, ver
 }
 
 function visionDetailTokens(value: string) {
-  return new Set(normalizeText(value).split(/\s+/).filter(token => token.length >= 2));
+  return new Set(normalizeText(value).split(/\\s+/).filter(token => token.length >= 2));
 }
 
 function hasVisionDetailConsensus(discovered: string, verified: string) {
@@ -112,6 +112,12 @@ new_test = """  it('Vision-2 yanlış başlığı OCR ve Vision-1 birlikte deste
   });
 """
 replace_once(TEST, old_test, new_test)
+
+replace_once(
+    TEST,
+    "expect(result.rejections[0].reason).toContain('açıklamasını yeterince desteklemiyor');",
+    "expect(result.rejections[0].reason).toContain('olgusal mutabakatıyla');",
+)
 
 marker = """  it('yerel OCR başlığı ve açıklamayı ayrı ayrı destekler', () => {
 """
