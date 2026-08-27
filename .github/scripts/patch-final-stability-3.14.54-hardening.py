@@ -9,6 +9,16 @@ def replace_once(path: str, old: str, new: str) -> None:
         raise SystemExit(f'{path}: expected one match, found {count}: {old[:160]!r}')
     p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
+
+def replace_exact(path: str, old: str, new: str, expected: int) -> None:
+    p = Path(path)
+    text = p.read_text(encoding='utf-8')
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(f'{path}: expected {expected} matches, found {count}: {old[:160]!r}')
+    p.write_text(text.replace(old, new), encoding='utf-8')
+
+
 path = 'apps/web/src/lib/newspaperEvidenceVerification.ts'
 old = r'''export function hasLocalOcrHeadlineSupport(headline: string, ocrEvidence: string) {
   const expected = ocrTokens(headline);
@@ -54,15 +64,11 @@ replace_once(
 )
 
 path = 'apps/web/src/lib/newspaperEvidenceVerification.test.ts'
-replace_once(
+replace_exact(
     path,
     '      "Avrupa\'da tur gecesi Fenerbahçe bu akşam sahaya çıkacak",',
     '      "Avrupa\'da tur gecesi\\nFenerbahçe bu akşam sahaya çıkacak",',
-)
-replace_once(
-    path,
-    '      "Avrupa\'da tur gecesi Fenerbahçe bu akşam sahaya çıkacak",',
-    '      "Avrupa\'da tur gecesi\\nFenerbahçe bu akşam sahaya çıkacak",',
+    2,
 )
 replace_once(
     path,
