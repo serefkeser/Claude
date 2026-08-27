@@ -1,6 +1,0 @@
-OTONOM 3.14.55
-- discovery uses original full page only; coordinates are original-page coordinates
-- Vision-1 is location discovery only, never publication text
-- Vision-2 title + detail must be supported by local OCR from the SAME expanded crop
-- OCR is reject-only and never supplies publication/TTS text
-- keep fail-closed: >=5 verified stories required
