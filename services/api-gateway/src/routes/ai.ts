@@ -17,6 +17,9 @@ const MAX_IMAGES = 3;
 const MAX_BASE64_CHARS = 16_000_000;
 const MAX_TEXT_CHARS = 40_000;
 const MAX_TTS_CHARS = 5_000;
+const NEWSPAPER_VERIFICATION_PROVIDER_TIMEOUT_MS = 18_000;
+const NEWSPAPER_VERIFICATION_MAX_PROVIDER_CALLS = 1;
+const NEWSPAPER_VERIFICATION_MAX_TOKENS = 3_072;
 
 interface OcrHeadlineCandidate {
   id: string;
@@ -266,7 +269,9 @@ aiRoutes.post('/analyze', async c => {
       task: images.length ? 'vision' : 'text',
       messages: buildAnalyzeMessages({ ...body, images }),
       temperature: isNewspaperVerification ? 0 : isNewspaper ? 0.05 : 0.2,
-      maxTokens: isNewspaper ? 4096 : 6144,
+      maxTokens: isNewspaperVerification ? NEWSPAPER_VERIFICATION_MAX_TOKENS : isNewspaper ? 4096 : 6144,
+      providerTimeoutMs: isNewspaperVerification ? NEWSPAPER_VERIFICATION_PROVIDER_TIMEOUT_MS : undefined,
+      maxProviderCalls: isNewspaperVerification ? NEWSPAPER_VERIFICATION_MAX_PROVIDER_CALLS : undefined,
       responseFormat: 'json',
       responseSchema: isNewspaper ? 'newspaper' : 'hermes',
       validateResponse: isNewspaperVerification

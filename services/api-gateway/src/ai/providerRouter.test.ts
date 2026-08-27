@@ -457,6 +457,90 @@ describe('AI provider fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('gazete birebir doğrulamasında istek bazlı Vision timeoutu sağlayıcıyı 18 saniyede kesip sonraki sağlayıcıya geçer', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation((input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('api.groq.com')) {
+        return new Promise<Response>((_resolve, reject) => {
+          const abort = () => {
+            const error = new Error('Aborted');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (init?.signal?.aborted) abort();
+          else init?.signal?.addEventListener('abort', abort, { once: true });
+        });
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"isContentUnreadable":false,"gazeteBasliklari":[]}' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = generateWithFallback({
+      ENVIRONMENT: 'production',
+      GROQ_API_KEY: 'groq-test',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_VISION_PROVIDER_ORDER: 'groq,gemini',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+      providerTimeoutMs: 18_000,
+      maxProviderCalls: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(18_001);
+    const result = await pending;
+
+    expect(result.provider).toBe('gemini');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      provider: 'groq',
+      ok: false,
+      reason: expect.stringContaining('18 saniyede yanıtını tamamlamadı'),
+    }));
+  });
+
+  it('gazete birebir doğrulamasında aynı JSON sağlayıcısını ikinci kez denemeden sıradaki sağlayıcıya geçer', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          message: 'Failed to validate JSON. Please adjust your prompt.',
+          code: 'json_validate_failed',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"isContentUnreadable":false,"gazeteBasliklari":[]}' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateWithFallback({
+      ENVIRONMENT: 'production',
+      GROQ_API_KEY: 'groq-test',
+      GEMINI_API_KEY: 'gemini-test',
+      AI_VISION_PROVIDER_ORDER: 'groq,gemini',
+    }, {
+      task: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'image', mimeType: 'image/jpeg', data: 'AA==' }] }],
+      responseFormat: 'json',
+      responseSchema: 'newspaper',
+      providerTimeoutMs: 18_000,
+      maxProviderCalls: 1,
+    });
+
+    expect(result.provider).toBe('gemini');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      provider: 'groq',
+      status: 400,
+      ok: false,
+    }));
+    expect(result.attempts[0].reason).not.toContain('yeniden deneniyor');
+  });
+
   it('ZenMux ücretli fallbackini açık izin olmadan etkinleştirmez', () => {
     expect(getConfiguredProviders({
       ENVIRONMENT: 'production',

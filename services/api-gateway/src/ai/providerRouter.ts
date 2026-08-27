@@ -53,6 +53,8 @@ export interface AiGenerationRequest {
   responseFormat?: 'text' | 'json';
   responseSchema?: 'hermes' | 'newspaper';
   validateResponse?: (text: string) => void;
+  providerTimeoutMs?: number;
+  maxProviderCalls?: number;
 }
 
 export interface AiProviderAttempt {
@@ -327,10 +329,18 @@ function sleep(ms: number) {
 }
 
 function providerTimeoutMs(provider: ProviderDefinition, request: AiGenerationRequest) {
-  if (request.task === 'vision' && provider.name === 'groq') return GROQ_VISION_TIMEOUT_MS;
-  if (request.task === 'vision' && provider.name === 'nvidia') return NVIDIA_VISION_TIMEOUT_MS;
-  if (request.task === 'vision' && provider.name === 'openrouter') return OPENROUTER_VISION_TIMEOUT_MS;
-  return PROVIDER_TIMEOUT_MS;
+  const defaultTimeout = request.task === 'vision' && provider.name === 'groq'
+    ? GROQ_VISION_TIMEOUT_MS
+    : request.task === 'vision' && provider.name === 'nvidia'
+      ? NVIDIA_VISION_TIMEOUT_MS
+      : request.task === 'vision' && provider.name === 'openrouter'
+        ? OPENROUTER_VISION_TIMEOUT_MS
+        : request.task === 'vision' && provider.name === 'gemini'
+          ? GEMINI_VISION_TIMEOUT_MS
+          : PROVIDER_TIMEOUT_MS;
+  const requestedTimeout = Number(request.providerTimeoutMs || 0);
+  if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) return defaultTimeout;
+  return Math.min(defaultTimeout, Math.max(1_000, Math.floor(requestedTimeout)));
 }
 
 async function callOpenAiCompatible(
@@ -479,7 +489,7 @@ async function callGemini(
       .trim();
     if (!text) throw new Error('Gemini boş yanıt döndürdü.');
     return text;
-  }, request.task === 'vision' ? GEMINI_VISION_TIMEOUT_MS : PROVIDER_TIMEOUT_MS, 'Sağlayıcı gemini');
+  }, providerTimeoutMs(provider, request), 'Sağlayıcı gemini');
 }
 
 export async function generateWithFallback(
@@ -493,10 +503,15 @@ export async function generateWithFallback(
 
   const attempts: AiProviderAttempt[] = [];
   for (const provider of providers) {
-    const providerCalls = provider.name === 'gemini'
+    const defaultProviderCalls = provider.name === 'gemini'
       || ((provider.name === 'openrouter' || provider.name === 'groq') && request.responseFormat === 'json')
       ? 2
       : 1;
+    const requestedProviderCalls = Number(request.maxProviderCalls || defaultProviderCalls);
+    const providerCalls = Math.max(1, Math.min(
+      defaultProviderCalls,
+      Number.isFinite(requestedProviderCalls) ? Math.floor(requestedProviderCalls) : defaultProviderCalls,
+    ));
 
     for (let callIndex = 0; callIndex < providerCalls; callIndex += 1) {
       try {
@@ -511,19 +526,23 @@ export async function generateWithFallback(
       } catch (error) {
         const status = errorStatus(error);
         const reason = errorReason(error);
-        const retryGemini = provider.name === 'gemini'
+        const hasRetrySlot = callIndex + 1 < providerCalls;
+        const retryGemini = hasRetrySlot
+          && provider.name === 'gemini'
           && callIndex === 0
           && request.responseFormat === 'json'
           && (
             (typeof status === 'number' && GEMINI_TRANSIENT_STATUSES.has(status))
             || status === undefined
           );
-        const retryGroq = provider.name === 'groq'
+        const retryGroq = hasRetrySlot
+          && provider.name === 'groq'
           && callIndex === 0
           && request.responseFormat === 'json'
           && status === 400
           && /json_validate_failed|failed to validate json/i.test(reason);
-        const retryOpenRouter = provider.name === 'openrouter'
+        const retryOpenRouter = hasRetrySlot
+          && provider.name === 'openrouter'
           && callIndex === 0
           && request.responseFormat === 'json'
           && (status === 400 || status === undefined);
