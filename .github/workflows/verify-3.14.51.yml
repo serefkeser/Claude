@@ -24,7 +24,7 @@ jobs:
           node-version: '22'
 
       - name: Apply newspaper evidence patch
-        run: python .github/scripts/patch-newspaper-evidence-3.14.51.py
+        run: python .github/scripts/patch-newspaper-evidence-3.14.51-v2.py
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
