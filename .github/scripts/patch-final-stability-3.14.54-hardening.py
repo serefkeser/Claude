@@ -53,6 +53,23 @@ replace_once(
     "        evidence.set(candidate.id.toUpperCase(), String(result.data?.text || '').replace(/\\r/g, '').trim());",
 )
 
+path = 'apps/web/src/lib/newspaperEvidenceVerification.test.ts'
+replace_once(
+    path,
+    '      "Avrupa\'da tur gecesi Fenerbahçe bu akşam sahaya çıkacak",',
+    '      "Avrupa\'da tur gecesi\\nFenerbahçe bu akşam sahaya çıkacak",',
+)
+replace_once(
+    path,
+    '      "Avrupa\'da tur gecesi Fenerbahçe bu akşam sahaya çıkacak",',
+    '      "Avrupa\'da tur gecesi\\nFenerbahçe bu akşam sahaya çıkacak",',
+)
+replace_once(
+    path,
+    '      "Denizoğlu\'nun ölümünde cinayet izi soruşturması sürüyor",',
+    '      "Denizoğlu\'nun ölümünde cinayet izi\\nsoruşturması sürüyor",',
+)
+
 path = 'apps/web/src/lib/localRenderer.subtitle.test.ts'
 replace_once(
     path,
