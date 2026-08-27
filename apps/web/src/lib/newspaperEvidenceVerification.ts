@@ -36,7 +36,7 @@ export interface NewspaperVerificationConsensus {
   rejections: NewspaperVerificationRejection[];
 }
 
-function normalizeVisionHeadline(value: string) {
+function normalizeText(value: string) {
   return String(value || '')
     .toLocaleLowerCase('tr-TR')
     .replace(/[’‘`´']/g, '')
@@ -50,7 +50,7 @@ const OCR_FOLD: Record<string, string> = {
 };
 
 function normalizeOcrGuard(value: string) {
-  return normalizeVisionHeadline(value)
+  return normalizeText(value)
     .replace(/[çğıöşü]/g, character => OCR_FOLD[character] || character);
 }
 
@@ -101,53 +101,60 @@ function exactFacts(value: string) {
   return normalizeOcrGuard(value).match(/(?:%\s*)?\d+(?:[.,]\d+)?|[₺$€£]/g) || [];
 }
 
-export function hasLocalOcrHeadlineSupport(headline: string, ocrEvidence: string) {
-  const expected = ocrTokens(headline);
-  if (expected.length < 2) return false;
-  const facts = exactFacts(headline);
-  const evidenceFacts = new Set(exactFacts(ocrEvidence));
+function hasLocalOcrTextSupport(options: {
+  expectedText: string;
+  ocrEvidence: string;
+  minTokens: number;
+  maxLines: number;
+  minRecall: number;
+  minPrecision: number;
+}) {
+  const expected = ocrTokens(options.expectedText);
+  if (expected.length < options.minTokens) return false;
+
+  const facts = exactFacts(options.expectedText);
+  const evidenceFacts = new Set(exactFacts(options.ocrEvidence));
   if (!facts.every(fact => evidenceFacts.has(fact))) return false;
 
-  const rawLines = String(ocrEvidence || '')
+  const rawLines = String(options.ocrEvidence || '')
     .split(/\n+/)
     .map(line => line.trim())
     .filter(Boolean);
   if (!rawLines.length) return false;
 
   for (let start = 0; start < rawLines.length; start += 1) {
-    for (let count = 1; count <= 3 && start + count <= rawLines.length; count += 1) {
+    for (let count = 1; count <= options.maxLines && start + count <= rawLines.length; count += 1) {
       const windowTokens = ocrTokens(rawLines.slice(start, start + count).join(' '));
       if (!windowTokens.length) continue;
       const matched = orderedOcrCoverage(expected, windowTokens) * expected.length;
       const recall = matched / expected.length;
       const precision = matched / windowTokens.length;
-      if (recall >= 0.82 && precision >= 0.82) return true;
+      if (recall >= options.minRecall && precision >= options.minPrecision) return true;
     }
   }
   return false;
 }
 
-function hasVisionHeadlineConsensus(discovered: string, verified: string) {
-  const left = normalizeVisionHeadline(discovered);
-  const right = normalizeVisionHeadline(verified);
-  return Boolean(left) && left === right;
+export function hasLocalOcrHeadlineSupport(headline: string, ocrEvidence: string) {
+  return hasLocalOcrTextSupport({
+    expectedText: headline,
+    ocrEvidence,
+    minTokens: 2,
+    maxLines: 4,
+    minRecall: 0.82,
+    minPrecision: 0.62,
+  });
 }
 
-function detailTokens(value: string) {
-  return new Set(normalizeVisionHeadline(value).split(/\s+/).filter(Boolean));
-}
-
-function hasVisionDetailConsensus(discovered: string, verified: string) {
-  const left = detailTokens(discovered);
-  const right = detailTokens(verified);
-  if (left.size < 4 || right.size < 4) return false;
-  const shared = [...left].filter(token => right.has(token)).length;
-  const overlap = shared / Math.max(1, Math.min(left.size, right.size));
-  const leftFacts = exactFacts(discovered).sort();
-  const rightFacts = exactFacts(verified).sort();
-  const factsMatch = leftFacts.length === rightFacts.length
-    && leftFacts.every((fact, index) => fact === rightFacts[index]);
-  return overlap >= 0.58 && factsMatch;
+export function hasLocalOcrDetailSupport(detail: string, ocrEvidence: string) {
+  return hasLocalOcrTextSupport({
+    expectedText: detail,
+    ocrEvidence,
+    minTokens: 4,
+    maxLines: 8,
+    minRecall: 0.62,
+    minPrecision: 0.42,
+  });
 }
 
 export function reconcileVerifiedNewspaperText(
@@ -168,6 +175,7 @@ export function reconcileVerifiedNewspaperText(
 
   const candidates: VerifiedNewspaperCandidate[] = [];
   const rejections: NewspaperVerificationRejection[] = [];
+
   for (const candidate of discovered) {
     const id = String(candidate.id || '').trim().toUpperCase();
     const exact = byId.get(id);
@@ -182,18 +190,15 @@ export function reconcileVerifiedNewspaperText(
       reject('ikinci Vision geçişinde aynı H kimliğiyle tam başlık+açıklama yok');
       continue;
     }
-    if (!hasVisionHeadlineConsensus(candidate.text, exact.baslik)) {
-      reject('Vision-1 ve Vision-2 başlıkları birebir uyuşmuyor');
-      continue;
-    }
-    if (!hasVisionDetailConsensus(candidate.detail, exact.aciklama)) {
-      reject('Vision-1 ve Vision-2 açıklamalarında yeterli metin/olgusal mutabakat yok');
-      continue;
-    }
+
     if (localOcrEvidence) {
       const evidence = localOcrEvidence.get(id) || '';
       if (!hasLocalOcrHeadlineSupport(exact.baslik, evidence)) {
-        reject('yerel OCR aynı gazete kırpımında başlığı yeterince desteklemiyor');
+        reject('aynı geniş gazete kırpımındaki yerel OCR, Vision-2 başlığını yeterince desteklemiyor');
+        continue;
+      }
+      if (!hasLocalOcrDetailSupport(exact.aciklama, evidence)) {
+        reject('aynı geniş gazete kırpımındaki yerel OCR, Vision-2 açıklamasını yeterince desteklemiyor');
         continue;
       }
     }
@@ -220,13 +225,13 @@ export function computeNewspaperVerificationCrop(options: {
   const w = clamp(Number(candidate.w || 1), 1, 100) / 100;
   const h = clamp(Number(candidate.h || 1), 1, 100) / 100;
 
-  const horizontalPad = Math.max(imageWidth * 0.012, imageWidth * w * 0.08);
-  const verticalPad = Math.max(imageHeight * 0.006, imageHeight * h * 0.08);
+  const horizontalPad = Math.max(imageWidth * 0.018, imageWidth * w * 0.15);
+  const verticalPad = Math.max(imageHeight * 0.01, imageHeight * h * 0.12);
   const requestedHeight = Math.max(
-    imageHeight * 0.12,
-    imageHeight * h * 1.9,
+    imageHeight * 0.16,
+    imageHeight * h * 2.4,
   );
-  const maximumHeight = imageHeight * 0.30;
+  const maximumHeight = imageHeight * 0.34;
 
   const left = clamp(Math.floor(imageWidth * x - horizontalPad), 0, Math.max(0, imageWidth - 1));
   const top = clamp(Math.floor(imageHeight * y - verticalPad), 0, Math.max(0, imageHeight - 1));
@@ -256,28 +261,6 @@ export function applyVerifiedNewspaperText(
   return reconcileVerifiedNewspaperText(discovered, verified).candidates;
 }
 
-function computeNewspaperHeadlineOcrCrop(options: {
-  imageWidth: number;
-  imageHeight: number;
-  candidate: Pick<VerifiedNewspaperCandidate, 'x' | 'y' | 'w' | 'h'>;
-}) {
-  const { imageWidth, imageHeight, candidate } = options;
-  const x = clamp(Number(candidate.x || 0), 0, 100) / 100;
-  const y = clamp(Number(candidate.y || 0), 0, 100) / 100;
-  const w = clamp(Number(candidate.w || 1), 1, 100) / 100;
-  const h = clamp(Number(candidate.h || 1), 1, 100) / 100;
-  const horizontalPad = Math.max(imageWidth * 0.012, imageWidth * w * 0.05);
-  const headlineHeight = Math.min(
-    imageHeight * 0.18,
-    Math.max(imageHeight * 0.055, imageHeight * h * 1.05),
-  );
-  const left = clamp(Math.floor(imageWidth * x - horizontalPad), 0, Math.max(0, imageWidth - 1));
-  const top = clamp(Math.floor(imageHeight * y - imageHeight * 0.004), 0, Math.max(0, imageHeight - 1));
-  const right = clamp(Math.ceil(imageWidth * (x + w) + horizontalPad), left + 1, imageWidth);
-  const bottom = clamp(Math.ceil(top + headlineHeight), top + 1, imageHeight);
-  return { left, top, width: right - left, height: bottom - top };
-}
-
 export async function readLocalHeadlineOcrEvidence(
   blob: Blob,
   candidates: VerifiedNewspaperCandidate[],
@@ -289,12 +272,12 @@ export async function readLocalHeadlineOcrEvidence(
     try {
       const evidence = new Map<string, string>();
       for (const candidate of candidates.slice(0, 9)) {
-        const crop = computeNewspaperHeadlineOcrCrop({
+        const crop = computeNewspaperVerificationCrop({
           imageWidth: bitmap.width,
           imageHeight: bitmap.height,
           candidate,
         });
-        const scale = Math.max(1, Math.min(3, 1500 / Math.max(1, crop.width)));
+        const scale = Math.max(1, Math.min(3, 1800 / Math.max(1, crop.width)));
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(crop.width * scale));
         canvas.height = Math.max(1, Math.round(crop.height * scale));
@@ -354,6 +337,34 @@ function blobToBase64(blob: Blob) {
   });
 }
 
+function drawTargetBox(options: {
+  context: CanvasRenderingContext2D;
+  candidate: Pick<VerifiedNewspaperCandidate, 'x' | 'y' | 'w' | 'h'>;
+  imageWidth: number;
+  imageHeight: number;
+  crop: NewspaperEvidenceCrop;
+  targetX: number;
+  targetY: number;
+  scale: number;
+}) {
+  const { context, candidate, imageWidth, imageHeight, crop, targetX, targetY, scale } = options;
+  const sourceLeft = imageWidth * clamp(Number(candidate.x || 0), 0, 100) / 100;
+  const sourceTop = imageHeight * clamp(Number(candidate.y || 0), 0, 100) / 100;
+  const sourceWidth = imageWidth * clamp(Number(candidate.w || 1), 1, 100) / 100;
+  const sourceHeight = imageHeight * clamp(Number(candidate.h || 1), 1, 100) / 100;
+
+  const boxX = targetX + (sourceLeft - crop.left) * scale;
+  const boxY = targetY + (sourceTop - crop.top) * scale;
+  const boxWidth = Math.max(8, sourceWidth * scale);
+  const boxHeight = Math.max(8, sourceHeight * scale);
+
+  context.save();
+  context.strokeStyle = '#d00000';
+  context.lineWidth = 6;
+  context.strokeRect(boxX, boxY, boxWidth, boxHeight);
+  context.restore();
+}
+
 export async function prepareNewspaperEvidenceSheet(
   blob: Blob,
   candidates: VerifiedNewspaperCandidate[],
@@ -409,6 +420,7 @@ export async function prepareNewspaperEvidenceSheet(
       const targetHeight = Math.max(1, Math.round(crop.height * scale));
       const targetX = cardX + Math.floor((cardWidth - targetWidth) / 2);
       const targetY = imageY + Math.floor((imageHeight - targetHeight) / 2);
+
       context.drawImage(
         bitmap,
         crop.left,
@@ -420,11 +432,22 @@ export async function prepareNewspaperEvidenceSheet(
         targetWidth,
         targetHeight,
       );
+
+      drawTargetBox({
+        context,
+        candidate,
+        imageWidth: bitmap.width,
+        imageHeight: bitmap.height,
+        crop,
+        targetX,
+        targetY,
+        scale,
+      });
     });
 
     const rendered = await canvasToJpeg(canvas);
     return {
-      name: `${sourceName} · H1-H${items.length} birebir haber doğrulama kırpımları`,
+      name: `${sourceName} · H1-H${items.length} birebir haber doğrulama kırpımları · kırmızı çerçeve hedef bölge`,
       mimeType: 'image/jpeg',
       data: await blobToBase64(rendered),
     };
