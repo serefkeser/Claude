@@ -157,6 +157,30 @@ export function hasLocalOcrDetailSupport(detail: string, ocrEvidence: string) {
   });
 }
 
+function hasVisionHeadlineConsensus(discovered: string, verified: string) {
+  const left = normalizeText(discovered);
+  const right = normalizeText(verified);
+  return Boolean(left) && left === right;
+}
+
+function visionDetailTokens(value: string) {
+  return new Set(normalizeText(value).split(/\s+/).filter(token => token.length >= 2));
+}
+
+function hasVisionDetailConsensus(discovered: string, verified: string) {
+  const left = visionDetailTokens(discovered);
+  const right = visionDetailTokens(verified);
+  if (left.size < 4 || right.size < 4) return false;
+
+  const shared = [...left].filter(token => right.has(token)).length;
+  const recall = shared / Math.max(1, Math.min(left.size, right.size));
+  const leftFacts = exactFacts(discovered).sort();
+  const rightFacts = exactFacts(verified).sort();
+  const factsMatch = leftFacts.length === rightFacts.length
+    && leftFacts.every((fact, index) => fact === rightFacts[index]);
+  return recall >= 0.66 && factsMatch;
+}
+
 export function reconcileVerifiedNewspaperText(
   discovered: VerifiedNewspaperCandidate[],
   verified: NewspaperVerificationHeadline[],
@@ -193,12 +217,17 @@ export function reconcileVerifiedNewspaperText(
 
     if (localOcrEvidence) {
       const evidence = localOcrEvidence.get(id) || '';
-      if (!hasLocalOcrHeadlineSupport(exact.baslik, evidence)) {
-        reject('aynı geniş gazete kırpımındaki yerel OCR, Vision-2 başlığını yeterince desteklemiyor');
+      const headlineByOcr = hasLocalOcrHeadlineSupport(exact.baslik, evidence);
+      const headlineByIndependentVision = hasVisionHeadlineConsensus(candidate.text, exact.baslik);
+      if (!headlineByOcr && !headlineByIndependentVision) {
+        reject('başlık ne aynı kırpım OCR kanıtıyla ne de bağımsız Vision-1/Vision-2 birebir mutabakatıyla doğrulandı');
         continue;
       }
-      if (!hasLocalOcrDetailSupport(exact.aciklama, evidence)) {
-        reject('aynı geniş gazete kırpımındaki yerel OCR, Vision-2 açıklamasını yeterince desteklemiyor');
+
+      const detailByOcr = hasLocalOcrDetailSupport(exact.aciklama, evidence);
+      const detailByIndependentVision = hasVisionDetailConsensus(candidate.detail, exact.aciklama);
+      if (!detailByOcr && !detailByIndependentVision) {
+        reject('açıklama ne aynı kırpım OCR kanıtıyla ne de bağımsız Vision-1/Vision-2 olgusal mutabakatıyla doğrulandı');
         continue;
       }
     }
