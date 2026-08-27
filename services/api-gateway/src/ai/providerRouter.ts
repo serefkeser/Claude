@@ -146,6 +146,7 @@ const NEWSPAPER_RESPONSE_SCHEMA = {
       items: {
         type: 'OBJECT',
         properties: {
+          sourceHeadlineId: { type: 'STRING' },
           baslik: { type: 'STRING' },
           aciklama: { type: 'STRING' },
           onem: { type: 'NUMBER' },

@@ -86,6 +86,52 @@ function normalizeHeadline(value: unknown) {
   return String(value || '').toLocaleLowerCase('tr-TR').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+function verificationHeadlineId(value: unknown) {
+  const id = String(value || '').trim().toUpperCase();
+  return /^H\d+$/.test(id) ? id : '';
+}
+
+function validateNewspaperVerificationResponse(text: string) {
+  validateHermesNewspaperResponse(text, []);
+  const parsed = parseAiJsonObject(text);
+  const headlines = Array.isArray(parsed.gazeteBasliklari)
+    ? parsed.gazeteBasliklari.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    : [];
+  const ids = new Set(
+    headlines
+      .map(item => verificationHeadlineId(item.sourceHeadlineId))
+      .filter(Boolean),
+  );
+  if (ids.size < 5) {
+    throw new Error('Gazete birebir doğrulamasında en az 5 farklı H kimliği korunamadı; diğer sağlayıcı deneniyor.');
+  }
+}
+
+export function normalizeNewspaperVerificationScript(script: Record<string, unknown>) {
+  const rawHeadlines = Array.isArray(script.gazeteBasliklari)
+    ? script.gazeteBasliklari.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    : [];
+  const headlines = rawHeadlines
+    .map(headline => ({
+      ...headline,
+      sourceHeadlineId: verificationHeadlineId(headline.sourceHeadlineId),
+      baslik: String(headline.baslik || '').replace(/\s+/g, ' ').trim(),
+      aciklama: String(headline.aciklama || '').replace(/\s+/g, ' ').trim(),
+    }))
+    .filter(headline => headline.sourceHeadlineId && headline.baslik && headline.aciklama)
+    .filter((headline, index, all) => all.findIndex(item => item.sourceHeadlineId === headline.sourceHeadlineId) === index)
+    .sort((left, right) => Number(left.sourceHeadlineId.slice(1)) - Number(right.sourceHeadlineId.slice(1)))
+    .slice(0, 9);
+
+  return {
+    ...script,
+    isContentUnreadable: headlines.length < 5,
+    videoSlides: [],
+    visionGazeteBasliklari: headlines,
+    gazeteBasliklari: headlines,
+  };
+}
+
 /**
  * Hermes 10 gazete davranışı:
  * - Tam gazete görselinden Vision tarafından çıkarılan gazeteBasliklari ana kaynaktır.
@@ -215,21 +261,26 @@ aiRoutes.post('/analyze', async c => {
   try {
     const ocrCandidates = parseOcrHeadlineCandidates(body.text || '');
     const isNewspaper = body.inputType === 'gazete';
+    const isNewspaperVerification = isNewspaper && body.config?.analysisMode === 'newspaper_verify';
     const generated = await generateWithFallback(c.env, {
       task: images.length ? 'vision' : 'text',
       messages: buildAnalyzeMessages({ ...body, images }),
-      temperature: isNewspaper ? 0.05 : 0.2,
+      temperature: isNewspaperVerification ? 0 : isNewspaper ? 0.05 : 0.2,
       maxTokens: isNewspaper ? 4096 : 6144,
       responseFormat: 'json',
       responseSchema: isNewspaper ? 'newspaper' : 'hermes',
-      validateResponse: isNewspaper
-        ? text => validateHermesNewspaperResponse(text, [])
-        : validateHermesScriptResponse,
+      validateResponse: isNewspaperVerification
+        ? validateNewspaperVerificationResponse
+        : isNewspaper
+          ? text => validateHermesNewspaperResponse(text, [])
+          : validateHermesScriptResponse,
     });
     const parsedScript = parseAiJsonObject(generated.text);
-    const script = isNewspaper
-      ? normalizeNewspaperScript(parsedScript, ocrCandidates)
-      : parsedScript;
+    const script = isNewspaperVerification
+      ? normalizeNewspaperVerificationScript(parsedScript)
+      : isNewspaper
+        ? normalizeNewspaperScript(parsedScript, ocrCandidates)
+        : parsedScript;
 
     return c.json({
       success: true,

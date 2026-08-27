@@ -6,6 +6,10 @@ import {
   type VerifiedNewspaperCandidate,
 } from './newspaperPipeline';
 import { prepareNewspaperVisionViews } from './newspaperVisionViews';
+import {
+  applyVerifiedNewspaperText,
+  prepareNewspaperEvidenceSheet,
+} from './newspaperEvidenceVerification';
 import { fetchWithNetworkRetry } from './networkRetry';
 import type { VisionNewspaperCandidate } from './newspaperVisionRecovery';
 
@@ -169,6 +173,20 @@ async function mediaToNewspaperVisionViews(media: MediaFile): Promise<AnalysisIm
   if (!response.ok) throw new Error(`${media.name} gazete Vision analizi için açılamadı.`);
   const source = await response.blob();
   return prepareNewspaperVisionViews(source, media.name || 'Gazete');
+}
+
+async function mediaToNewspaperEvidenceImage(
+  media: MediaFile,
+  candidates: VerifiedNewspaperCandidate[],
+): Promise<AnalysisImage> {
+  const url = media.url || media.thumbnailUrl;
+  if (!url || media.type !== 'image') {
+    throw new Error('Gazete birebir doğrulaması için geçerli bir gazete görseli gerekli.');
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${media.name} birebir doğrulama için açılamadı.`);
+  const source = await response.blob();
+  return prepareNewspaperEvidenceSheet(source, candidates, media.name || 'Gazete');
 }
 
 async function request<T>(path: string, body: unknown, allowTokenPrompt = true): Promise<T> {
@@ -425,22 +443,58 @@ export async function analyzeForVideo(options: {
 
   const candidates = buildHermes10NewspaperCandidates(result.script);
   writeSystemLog(
-    `Hermes 10 gazete okuma: Vision modelinden ${candidates.length} gerçek başlık+açıklama alındı.`,
+    `Hermes 10 gazete keşfi: Vision modelinden ${candidates.length} haber bölgesi bulundu; bu metinler henüz yayına alınmayacak.`,
     candidates.length >= 5 ? 'success' : 'warn',
+  );
+  if (candidates.length < 5) {
+    throw new Error('Gazete keşfinde en az 5 haber bölgesi bulunamadı; birebir okuma doğrulaması başlatılmadı.');
+  }
+
+  const verificationImage = await mediaToNewspaperEvidenceImage(imageCandidates[0], candidates);
+  writeSystemLog(
+    `Gazete birebir okuma doğrulaması: ${candidates.length} haber H1-H${candidates.length} olarak ayrı kırpımlarda büyütüldü; ikinci Vision geçişi başlatılıyor.`,
+  );
+  const verificationResult = await request<AnalyzeResult>('/analyze', {
+    inputType: 'gazete',
+    text: 'GAZETE BİREBİR DOĞRULAMA: Görsel H1-H9 etiketli bağımsız haber kırpımlarından oluşur. Her H kartında yalnız o kartın basılı başlığını ve fiziksel olarak bağlı spot/açıklamasını birebir oku. Önceki okuma metnini tahmin veya düzeltme kaynağı olarak kullanma. Kartlar arasında kelime veya cümle taşıma. sourceHeadlineId alanını kart etiketiyle aynen döndür.',
+    images: [verificationImage],
+    config: {
+      ...requestConfig,
+      analysisMode: 'newspaper_verify',
+    },
+  });
+
+  if (verificationResult.provider === 'local-fallback') {
+    throw new Error(
+      `Gazete birebir okuma doğrulaması başarısız oldu; ilk geçişteki olası yanlış metin videoya alınmadı. ${verificationResult.fallbackReason || ''}`.trim(),
+    );
+  }
+
+  const verifiedCandidates = applyVerifiedNewspaperText(
+    candidates,
+    verificationResult.script.gazeteBasliklari || [],
+  );
+  writeSystemLog(
+    `Gazete birebir doğrulama tamamlandı: ${verifiedCandidates.length}/${candidates.length} haber başlığı + açıklaması ikinci Vision okumasıyla H kimliğine kilitlendi.`,
+    verifiedCandidates.length >= 5 ? 'success' : 'warn',
   );
 
   const orderedScript = buildLockedNewspaperScript({
-    script: result.script,
-    candidates,
+    script: verificationResult.script,
+    candidates: verifiedCandidates,
     configuredSourceName: options.config.sourceName,
   });
 
   writeSystemLog(
-    `Gazete sahneleri hazır: ${orderedScript.videoSlides.length} haber · her haber tek sahne · özgün başlık + açıklama · AI görsel yok.`,
+    `Gazete sahneleri hazır: ${orderedScript.videoSlides.length} haber · yazı ve TTS yalnız ikinci birebir Vision okumasından üretildi · AI görsel yok.`,
     'success',
   );
 
-  return { ...result, script: normalizeScript(orderedScript) };
+  return {
+    ...verificationResult,
+    attempts: [...result.attempts, ...verificationResult.attempts],
+    script: normalizeScript(orderedScript),
+  };
 }
 
 function decodeBase64(value: string) {
