@@ -50,13 +50,14 @@ Dil: ${language}.
 
 İKİNCİ GEÇİŞ — BİREBİR BAŞLIK + SPOT DOĞRULAMA:
 1. Gönderilen TEK görsel H1, H2, H3... etiketli bağımsız gazete haber kırpımlarından oluşur. Her kart ayrı bir haber kanıtıdır.
-2. sourceHeadlineId alanını kartın H etiketinden aynen kopyala. H kimliği uydurma veya değiştirme.
-3. baslik yalnız kartta büyük/başlık tipografisiyle basılı gerçek haber başlığıdır. Harfleri, Türkçe karakterleri, kelime sırasını ve sayıları birebir koru. Dilbilgisi düzeltme, tahmin, normalleştirme veya yeniden yazma yapma.
-4. aciklama yalnız AYNI kartta o başlığın hemen altında/yanında fiziksel olarak bağlı spot veya haber girişinden 1-2 tam cümledir. Başka H kartından veya komşu haberden tek kelime taşıma.
-5. Bir kelimeyi güvenle okuyamıyorsan o H kartını tamamen atla. Eksik kelimeyi tahmin etme.
-6. Reklam, fotoğraf altyazısı, yazar künyesi, sayfa masthead'i veya başka haber metnini açıklamaya katma.
-7. En az 5 H kartını başlık+açıklama olarak güvenle doğrulayamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için uydurma üretme.
-8. Bu ikinci geçişte yalnız sourceHeadlineId, baslik ve aciklama döndür. Koordinat, önem puanı veya başka alan üretme.
+2. Her kartta kırmızı çerçeve ilk geçişin bulduğu hedef haber bölgesini gösterir. Öncelikle kırmızı çerçeve içindeki büyük başlığı oku; açıklamayı yalnız aynı kartta bu başlığa fiziksel olarak bağlı metinden al.
+3. sourceHeadlineId alanını kartın H etiketinden aynen kopyala. H kimliği uydurma veya değiştirme.
+4. baslik yalnız kartta büyük/başlık tipografisiyle basılı gerçek haber başlığıdır. Harfleri, Türkçe karakterleri, kelime sırasını ve sayıları birebir koru. Dilbilgisi düzeltme, tahmin, normalleştirme veya yeniden yazma yapma.
+5. aciklama yalnız AYNI kartta o başlığın hemen altında/yanında fiziksel olarak bağlı spot veya haber girişinden 1-2 tam cümledir. Başka H kartından veya komşu haberden tek kelime taşıma.
+6. Bir kelimeyi güvenle okuyamıyorsan o H kartını tamamen atla. Eksik kelimeyi tahmin etme.
+7. Reklam, fotoğraf altyazısı, yazar künyesi, sayfa masthead'i veya başka haber metnini açıklamaya katma.
+8. En az 5 H kartını başlık+açıklama olarak güvenle doğrulayamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için uydurma üretme.
+9. Bu ikinci geçişte yalnız sourceHeadlineId, baslik ve aciklama döndür. Koordinat, önem puanı veya başka alan üretme.
 
 Yalnız şu JSON yapısını döndür:
 {
@@ -68,22 +69,19 @@ Yalnız şu JSON yapısını döndür:
 }
 
 function newspaperSystemPrompt(language: string) {
-  return `Sen OTONOM gazete ilk sayfa okuma motorusun.
+  return `Sen OTONOM gazete ilk sayfa HABER BÖLGESİ KEŞİF motorusun.
 Çıktının tamamı geçerli JSON olmalı; Markdown, açıklama, düşünce metni veya kod bloğu kullanma.
 Dil: ${language}.
 
-GAZETE İLK SAYFASI — HERMES 10 OKUMA KURALLARI:
-1. Gönderilen TEK görsel bir gazete kanıt kolajıdır: solda tam sayfa, sağ üstte üst yakın plan, sağ altta alt yakın plan vardır. Üç panel AYNI gazete sayfasına aittir; sağ paneller yalnız okuma desteğidir, ayrı sayfa değildir. Tekrar görülen aynı haberi yalnız bir kez say.
-2. Ana veri kaynağın yalnız yüklenen gazete görselleridir. Kullanıcı metni gazetedeki metnin yerine geçmez.
-3. Görseldeki gerçek haber başlıklarından en az 5, en fazla 9 FARKLI haber seç. Büyük ana manşetten daha küçük haber kutularına doğru sırala.
-4. Her haber için yalnız baslik, aciklama, onem, x, y, w, h üret.
-5. baslik gazetede basılı gerçek başlık olmalı. Özetleme, yeniden yazma, dilbilgisi düzeltmesi yapma ve yeni kelime uydurma.
-6. aciklama yalnız o başlığın hemen altında veya yanında fiziksel olarak bağlı spot/açıklamadan 1-2 tam cümle olmalı. Başka haber metnini karıştırma.
-7. Sayı, tarih, yüzde, para, kişi, kurum ve yer adlarını gördüğün biçimde koru. Emin olmadığın haberi atla.
-8. Reklam, ilan, bulmaca, masthead/logo, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
-9. Koordinatlar YALNIZ soldaki tam sayfa paneli için sol üst 0,0; sağ alt 100,100 olacak şekilde yüzde cinsinden yaklaşık x/y/w/h değerleridir. Sağdaki yakın planı kullanarak okusan bile koordinatı soldaki tam sayfaya göre yaklaşıkla.
-10. En az 5 gerçek başlık+açıklama okuyamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için tahmin üretme.
-11. Başlık ve açıklama dışında video sahnesi, kapak metni, son söz, soru, kapanış veya ek alan üretme; bunları istemci doğrulanmış başlıklardan oluşturacak.
+BİRİNCİ GEÇİŞ — ORİJİNAL TAM SAYFADA KONUM KEŞFİ:
+1. Gönderilen TEK görsel doğrudan orijinal gazete ilk sayfasıdır; kolaj, yakın plan veya ikinci panel yoktur.
+2. Bu geçişin görevi yayın metni üretmek değil, en az 5 en fazla 9 gerçek haber bölgesini bulup ORİJİNAL sayfadaki konumlarını vermektir. Bu geçişteki baslik/aciklama yalnız bölge kimliği için okuma ipucudur ve videoda kullanılmayacaktır.
+3. Büyük ana manşetten daha küçük haber kutularına doğru farklı haber bölgeleri seç. Aynı haberi iki kez seçme.
+4. x/y/w/h değerleri doğrudan BU tam sayfada sol üst 0,0; sağ alt 100,100 olacak şekilde yüzde koordinatlarıdır. Başlık ve ona bağlı spotu birlikte kapsayan haber kutusunu işaretle.
+5. baslik ve aciklama yalnız bölgede gerçekten görebildiğin metinden gelmeli; okuyamadığın kelimeyi uydurma. Ancak bu metin ikinci geçişte yeniden ve bağımsız okunacaktır.
+6. Reklam, ilan, bulmaca, masthead/logo, slogan, köşe yazarı künyesi, fotoğraf altyazısı ve grafik etiketi bağımsız haber değildir.
+7. En az 5 gerçek haber bölgesi bulamıyorsan isContentUnreadable=true yap. Sayıyı tamamlamak için tahmin üretme.
+8. Başlık ve açıklama dışında video sahnesi, kapak metni, son söz, soru, kapanış veya ek alan üretme.
 
 Yalnız şu JSON yapısını döndür:
 {
@@ -154,9 +152,9 @@ export function buildAnalyzeMessages(input: AnalyzeInput): AiMessage[] {
   parts.push({
     type: 'text',
     text: isNewspaperVerification
-      ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nH1-H9 kartlarını birbirinden bağımsız oku. sourceHeadlineId + birebir baslik + yalnız aynı karta bağlı aciklama alanlarını döndür.`
+      ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nH1-H9 kartlarını birbirinden bağımsız oku. Kırmızı çerçeve hedef haber bölgesidir. sourceHeadlineId + birebir baslik + yalnız aynı karta bağlı aciklama alanlarını döndür.`
       : isGazete
-        ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nTek birleşik görselde soldaki tam sayfayı ve sağdaki iki yakın planı birlikte incele, tekrarları birleştir ve yalnız isContentUnreadable + gazeteBasliklari JSON yapısını döndür.`
+        ? `Kaynak adı yalnız bağlam içindir: ${config.sourceName || 'belirtilmedi'}\nBu tek görsel doğrudan orijinal tam gazete sayfasıdır. En az 5 gerçek haber bölgesini bul; x/y/w/h koordinatlarını bu görüntünün 0-100 sayfa koordinat sisteminde ver. İlk geçiş metni yayınlanmayacak.`
         : `Kaynak adı: ${config.sourceName || 'belirtilmedi'}\nİçerik türü: ${config.tip || 'haber'}\nVideo stili: ${config.videoStyle || 'cinematic'}\nEk kullanıcı yorumu: ${config.yorum || 'yok'}\nİçeriği analiz et ve yalnız şemaya uyan JSON döndür.`,
   });
 
